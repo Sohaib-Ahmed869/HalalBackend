@@ -135,7 +135,9 @@ class OrderController {
 
       const order = await Order.findOne({ docEntry });
 
+    
       if (!order) {
+        console.log('Order not found');
         return res.status(404).json({
           error: "Sales order not found",
         });
@@ -153,7 +155,7 @@ class OrderController {
       console.error("Error adding tag:", error);
       res.status(500).json({
         error: "Failed to add tag",
-        details: error.message,
+        details: error.message, 
       });
     }
   }

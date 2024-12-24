@@ -1,121 +1,127 @@
-// routes/sales.routes.js
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const XLSX = require("xlsx");
+const axios = require("axios");
+const FormData = require("form-data");
 const Sale = require("../models/sales.model");
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Upload Excel file
+const FLASK_BACKEND_URL = "http://127.0.0.1:5000/process_excel";
+
+// Function to transform data into desired schema
+const transformData = (dayData, date) => {
+  return {
+    date,
+    "Paiements Chèques": dayData["Paiements Chèques"] || [],
+    "Paiements Espèces": dayData["Paiements Espèces"] || [],
+    "Paiements CB Site": dayData["Paiements CB Site"] || [],
+    "Paiements CB Téléphone": dayData["Paiements CB Téléphone"] || [],
+    Virements: dayData["Virements"] || [],
+    "Livraisons non payées": dayData["Livraisons non payées"] || [],
+    POS: {
+      "Caisse Espèces": dayData.POS["Caisse Espèces"] || [],
+      "Caisse chèques": dayData.POS["Caisse chèques"] || [],
+      "Caisse CB": dayData.POS["Caisse CB"] || [],
+    },
+  };
+};
+
 router.post("/upload", upload.single("file"), async (req, res) => {
   try {
-    const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
-    const worksheet = workbook.Sheets["TOTAL"];
+    console.log("Processing file...");
+    const { start, end } = req.query;
+    console.log("Start date:", start);
+    console.log("End date:", end);
+    if (!start || !end) {
+      console.log("Start and end dates are required");
+      return res.status(400).json({
+        error:
+          "Start and end dates are required, e.g. ?start=YYYY-MM-DD&end=YYYY-MM-DD",
+      });
+    }
 
-    // Configure the header row and start row
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, {
-      raw: false, // Changed to false to get formatted values
-      dateNF: "DD/MM/YYYY", // Specify date format
-      range: 1,
+    if (!req.file) {
+      console.log("No file uploaded. Please attach a file.");
+      return res
+        .status(400)
+        .json({ error: "No file uploaded. Please attach a file." });
+    }
+
+    const formData = new FormData();
+    formData.append("file", req.file.buffer, {
+      filename: req.file.originalname,
+      contentType: req.file.mimetype,
     });
 
-    // Transform and save data
-    const salesData = jsonData.map((row) => {
-      // Helper function to clean numbers
-      const cleanNumber = (value) => {
-        if (!value || value === "-" || value === "€ -") return 0;
-        if (typeof value === "string") {
-          return (
-            parseFloat(value.replace("€", "").replace(",", ".").trim()) || 0
-          );
-        }
-        return parseFloat(value) || 0;
-      };
-
-      // Convert Excel date number to JS Date
-      const excelDateToJSDate = (excelDate) => {
-        if (!excelDate) return new Date();
-
-        // If it's already a date string, parse it
-        if (typeof excelDate === "string") {
-          const parts = excelDate.split("/");
-          if (parts.length === 3) {
-            return new Date(parts[2], parts[1] - 1, parts[0]);
-          }
-        }
-
-        // If it's an Excel date number
-        const unixTimestamp = (excelDate - 25569) * 86400 * 1000;
-        return new Date(unixTimestamp);
-      };
-
-      // Log the raw date value for debugging
-      console.log("Raw date value:", row.DATE);
-
-      return {
-        date: excelDateToJSDate(row.DATE),
-        ventePlace: {
-          esp: cleanNumber(row.ESPECE),
-          chq: cleanNumber(row.CHEQUE),
-          cb: cleanNumber(row.cb),
-          depense: cleanNumber(row.depense),
-        },
-        venteLivraison: {
-          virement: cleanNumber(row.VIREMENT),
-        },
-      };
-    });
-
-    // Filter out any invalid entries
-    const validSalesData = salesData.filter(
-      (sale) =>
-        sale.date instanceof Date &&
-        !isNaN(sale.date) && // Check if date is valid
-        (sale.ventePlace.esp !== 0 ||
-          sale.ventePlace.chq !== 0 ||
-          sale.ventePlace.cb !== 0 ||
-          sale.venteLivraison.virement !== 0)
-    );
-
-    // Log the processed data for debugging
-    console.log("First few processed entries:", validSalesData.slice(0, 3));
-
-    const existingDates = await Sale.find({
-      date: {
-        $in: validSalesData.map((sale) => sale.date),
+    const response = await axios.post(FLASK_BACKEND_URL, formData, {
+      params: {
+        start_date: start,
+        end_date: end,
       },
+      headers: {
+        ...formData.getHeaders(),
+      },
+      proxy: false,
+      httpAgent: new require("http").Agent({ family: 4 }),
     });
 
-    // Filter out sales data that already exists
-    const newSalesData = validSalesData.filter(
-      (newSale) =>
-        !existingDates.some(
-          (existingSale) =>
-            existingSale.date.getTime() === newSale.date.getTime()
-        )
-    );
+    const processedData = response.data;
+    let savedCount = 0;
+    let skippedCount = 0;
+    const errors = [];
 
-    if (newSalesData.length > 0) {
-      await Sale.insertMany(newSalesData);
+    for (const [day, dayData] of Object.entries(processedData)) {
+      try {
+        // Construct the date
+        const [year, month] = start.split("-");
+        const date = new Date(Number(year), Number(month) - 1, Number(day));
+
+        // Transform the data according to our schema
+        const transformedData = transformData(dayData, date);
+
+        // Check if a record for this date already exists
+        const existing = await Sale.findOne({ date });
+        if (!existing) {
+          await Sale.create(transformedData);
+          savedCount++;
+        } else {
+          skippedCount++;
+        }
+      } catch (error) {
+        errors.push(`Error processing day ${day}: ${error.message}`);
+      }
     }
 
     res.json({
-      message: "Data uploaded successfully",
-      count: newSalesData.length,
-      skipped: validSalesData.length - newSalesData.length,
+      message: "Processing complete",
+      processed: savedCount,
+      skipped: skippedCount,
+      errors: errors.length > 0 ? errors : undefined,
     });
   } catch (error) {
     console.error("Error processing file:", error);
-    res.status(500).json({ error: error.message });
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || error.message,
+    });
   }
 });
 
-// Get sales by date range
 router.get("/", async (req, res) => {
   try {
     const { start, end } = req.query;
+    if (!start || !end) {
+      return res
+        .status(400)
+        .json({ error: "Start and end dates are required" });
+    }
+
     const startDate = new Date(start);
     const endDate = new Date(end);
+    endDate.setHours(23, 59, 59, 999);
+
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return res.status(400).json({ error: "Invalid date format" });
+    }
 
     const sales = await Sale.find({
       date: {

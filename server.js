@@ -10,6 +10,7 @@ const invoiceRoutes = require("./routes/invoice.routes");
 const orderRoutes = require("./routes/order.routes");
 const purchaseRoutes = require("./routes/purchase.routes");
 const salesRoutes = require("./routes/sales.routes");
+const AnalysisRoutes = require("./routes/analysis.routes");
 
 dotenv.config();
 
@@ -23,6 +24,8 @@ app.use(
     credentials: true,
   })
 );
+app.use(express.json({ limit: "1000mb" }));
+app.use(express.urlencoded({ limit: "1000mb", extended: true }));
 
 // Connect to MongoDB
 mongoose
@@ -40,7 +43,7 @@ app.use("/api/invoices", invoiceRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/purchases", purchaseRoutes);
 app.use("/api/sales", salesRoutes);
-
+app.use("/api/analysis", AnalysisRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

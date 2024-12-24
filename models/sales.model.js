@@ -1,35 +1,114 @@
-// models/sales.model.js
 const mongoose = require("mongoose");
 
-const saleSchema = new mongoose.Schema({
+const salesSchema = new mongoose.Schema({
   date: {
     type: Date,
-    required: true
+    required: true,
+    unique: true,
   },
-  ventePlace: {
-    esp: {
-      type: Number,
-      default: 0
+  "Paiements Chèques": [
+    {
+      client: String,
+      amount: Number,
+      bank: String,
+      number: String,
+      remarks: String,
+      verified: Boolean,
     },
-    chq: {
-      type: Number,
-      default: 0
+  ],
+  "Paiements Espèces": [
+    {
+      client: String,
+      amount: Number,
+      bank: String,
+      number: String,
+      remarks: String,
+      verified: {
+        type: Boolean,
+        default: false,
+      },
     },
-    cb: {
-      type: Number,
-      default: 0
+  ],
+  "Paiements CB Site": [
+    {
+      client: String,
+      amount: Number,
+      bank: String,
+      verified: {
+        type: Boolean,
+        default: false,
+      },
     },
-    depense: {
-      type: Number,
-      default: 0
-    }
+  ],
+  "Paiements CB Téléphone": [
+    {
+      client: String,
+      amount: Number,
+      bank: String,
+      verified: {
+        type: Boolean,
+        default: false,
+      },
+    },
+  ],
+  Virements: [
+    {
+      client: String,
+      amount: Number,
+      bank: String,
+      number: String,
+      remarks: String,
+      verified: {
+        type: Boolean,
+        default: false,
+      },
+    },
+  ],
+  "Livraisons non payées": [
+    {
+      client: String,
+      amount: Number,
+      bank: String,
+      number: String,
+      remarks: String,
+      verified: {
+        type: Boolean,
+        default: false,
+      },
+    },
+  ],
+  POS: {
+    "Caisse Espèces": [
+      {
+        client: String,
+        amount: Number,
+        verified: {
+          type: Boolean,
+          default: false,
+        },
+      },
+    ],
+    "Caisse chèques": [
+      {
+        client: String,
+        amount: Number,
+        verified: {
+          type: Boolean,
+          default: false,
+        },
+      },
+    ],
+    "Caisse CB": [
+      {
+        client: String,
+        amount: Number,
+        verified: {
+          type: Boolean,
+          default: false,
+        },
+      },
+    ],
   },
-  venteLivraison: {
-    virement: {
-      type: Number,
-      default: 0
-    }
-  }
 });
 
-module.exports = mongoose.model("Sale", saleSchema);
+module.exports = mongoose.model("Sale", salesSchema);
