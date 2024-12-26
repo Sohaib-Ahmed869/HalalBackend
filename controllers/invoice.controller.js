@@ -464,6 +464,7 @@ class InvoiceController {
           $group: {
             _id: "$CardName",
             customerName: { $first: "$CardName" },
+            tag: { $first: "$tag" },
             totalSales: { $sum: "$DocTotal" },
             paidInvoiceCount: {
               $sum: {
@@ -723,6 +724,32 @@ class InvoiceController {
     } catch (error) {
       console.error("Error fetching dashboard stats:", error);
       res.status(500).json({ error: "Failed to fetch dashboard statistics" });
+    }
+  }
+
+  static async updateCustomerTag(req, res) {
+    try {
+      const { customerName } = req.body;
+      const { tag } = req.body;
+
+      if (!customerName || !tag) {
+        return res.status(400).json({
+          error: "Customer name and tag are required",
+        });
+      }
+
+      const result = await Invoice.updateMany(
+        { CardName: customerName },
+        { tag }
+      );
+
+      res.json({
+        message: "Tags updated successfully",
+        modifiedCount: result.modifiedCount,
+      });
+    } catch (error) {
+      console.error("Error updating customer tags:", error);
+      res.status(500).json({ error: "Failed to update customer tags" });
     }
   }
 }

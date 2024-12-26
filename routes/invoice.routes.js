@@ -24,4 +24,6 @@ router.get("/by-customer", InvoiceController.getCustomerInvoices);
 
 router.get('/dashboard-stats', InvoiceController.getDashboardStats);
 
+router.put('/customer', InvoiceController.updateCustomerTag);
+
 module.exports = router;

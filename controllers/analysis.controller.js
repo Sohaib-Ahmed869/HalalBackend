@@ -2,6 +2,49 @@ const stringSimilarity = require("string-similarity");
 const Invoice = require("../models/invoice.model");
 const Analysis = require("../models/analysis.model");
 class AnalysisController {
+  static normalizeCompanyName(name) {
+    if (!name) return "";
+
+    // Convert to lowercase
+    let normalized = name.toLowerCase();
+
+    // Remove common prefixes
+    const prefixes = ["sarl ", "sa ", "sas ", "eurl ", "sci "];
+    prefixes.forEach((prefix) => {
+      if (normalized.startsWith(prefix)) {
+        normalized = normalized.slice(prefix.length);
+      }
+    });
+
+    // Remove special characters and extra spaces
+    normalized = normalized
+      .replace(/[&\/\\#,+()$~%.'":*?<>{}]/g, " ") // Replace special chars with space
+      .replace(/\s+/g, " ") // Replace multiple spaces with single space
+      .trim();
+
+    // Common abbreviations and variations
+    const replacements = {
+      " co ": " company ",
+      " co.": " company",
+      " corp ": " corporation ",
+      " corp.": " corporation",
+      " bros ": " brothers ",
+      " bros.": " brothers",
+      "cie ": "company ",
+      "cie.": "company",
+      " ltd ": " limited ",
+      " ltd.": " limited",
+      " inc ": " incorporated ",
+      " inc.": " incorporated",
+    };
+
+    // Apply replacements
+    for (const [key, value] of Object.entries(replacements)) {
+      normalized = normalized.replace(new RegExp(key, "g"), value);
+    }
+
+    return normalized;
+  }
   static flattenExcelData(excelEntry) {
     const flattenedData = [];
     const date = excelEntry.date;
@@ -96,41 +139,53 @@ class AnalysisController {
       const { excelData, dateRange } = req.body;
       console.log("Received Excel Data:", excelData);
 
-      // Use the full date range for SAP data
-      const startDate = new Date(dateRange.start);
-      startDate.setDate(startDate.getDate() - 30);
-      // set end date to be end date + 30 days
-      const endDate = new Date(dateRange.end);
-      endDate.setDate(endDate.getDate() + 50);
-      startDate.setHours(0, 0, 0, 0); // Start of the day
-      endDate.setHours(23, 59, 59, 999); // End of the day
+      // Selected date range (for displaying discrepancies)
+      const selectedStartDate = new Date(dateRange.start);
+      const selectedEndDate = new Date(dateRange.end);
+      selectedStartDate.setHours(0, 0, 0, 0);
+      selectedEndDate.setHours(23, 59, 59, 999);
+
+      // Extended date range (for matching purposes)
+      const extendedStartDate = new Date(selectedStartDate);
+      const extendedEndDate = new Date(selectedEndDate);
+      extendedStartDate.setDate(extendedStartDate.getDate() - 50);
+      extendedEndDate.setDate(extendedEndDate.getDate() + 50);
 
       // Check if analysis already exists for this date range
       const existingAnalysis = await Analysis.findOne({
-        "dateRange.start": startDate,
-        "dateRange.end": endDate,
+        "dateRange.start": selectedStartDate,
+        "dateRange.end": selectedEndDate,
       });
 
       if (existingAnalysis) {
-        // Return existing analysis
+        // console.log(existingAnalysis.extendedSapDiscrepancies);
         return res.json({
           analysisId: existingAnalysis._id,
           matches: existingAnalysis.matches,
           excelDiscrepancies: existingAnalysis.excelDiscrepancies,
           sapDiscrepancies: existingAnalysis.sapDiscrepancies,
+          extendedSapDiscrepancies: existingAnalysis.extendedSapDiscrepancies,
           posAnalysis: existingAnalysis.posAnalysis,
         });
       }
 
-      // Fetch SAP invoices
-      const sapData = await Invoice.find({
+      // Fetch SAP invoices for extended date range
+      const allSapData = await Invoice.find({
         DocDate: {
-          $gte: startDate,
-          $lte: endDate,
+          $gte: extendedStartDate,
+          $lte: extendedEndDate,
         },
       }).lean();
 
-      console.log("Retrieved SAP Data:", sapData.length, "invoices");
+      // Filter SAP data for selected date range
+      const selectedRangeSapData = allSapData.filter((invoice) => {
+        const invoiceDate = new Date(invoice.DocDate);
+        return (
+          invoiceDate >= selectedStartDate && invoiceDate <= selectedEndDate
+        );
+      });
+
+      console.log("Retrieved SAP Data:", allSapData.length, "invoices");
 
       // Flatten Excel data
       const flattenedExcelData = [];
@@ -141,18 +196,18 @@ class AnalysisController {
 
       const matches = [];
       const excelDiscrepancies = [];
-      const sapDiscrepancies = [...sapData];
+      const sapDiscrepancies = [...selectedRangeSapData]; // Use selected range for discrepancies
+      const extendedSapDiscrepancies = [...allSapData]; // Keep full range for matching
 
       // Process regular transactions (excluding POS)
       for (const excelEntry of flattenedExcelData) {
-        // Skip POS entries as we'll handle them separately
         if (excelEntry.isPOS) continue;
 
         let bestMatch = null;
         let bestScore = 0;
         let bestIndex = -1;
 
-        sapData.forEach((sapEntry, index) => {
+        allSapData.forEach((sapEntry, index) => {
           // Skip POS entries in SAP
           if (
             sapEntry.CardCode === "C9999" ||
@@ -167,14 +222,45 @@ class AnalysisController {
           const dateDiff =
             Math.abs(excelDate - sapDate) / (1000 * 60 * 60 * 24);
 
-          if (dateDiff <= 3) {
+          if (dateDiff <= 50) {
+            // Extended matching window
             const amountDiff = Math.abs(excelEntry.amount - sapEntry.DocTotal);
             const amountTolerance = sapEntry.DocTotal * 0.01;
 
             if (amountDiff <= amountTolerance) {
+              // Normalize both names before comparison
+              const normalizedExcelName =
+                AnalysisController.normalizeCompanyName(excelEntry.client);
+              const normalizedSapName = AnalysisController.normalizeCompanyName(
+                sapEntry.CardName
+              );
+
+              // First try exact match after normalization
+              if (normalizedExcelName === normalizedSapName) {
+                bestScore = 1;
+                bestMatch = sapEntry;
+                bestIndex = index;
+                return; // Exit the loop as we found an exact match
+              }
+
+              // If no exact match, check if one name contains the other
+              if (
+                normalizedSapName.includes(normalizedExcelName) ||
+                normalizedExcelName.includes(normalizedSapName)
+              ) {
+                const containsScore = 0.9; // High score for containment
+                if (containsScore > bestScore) {
+                  bestScore = containsScore;
+                  bestMatch = sapEntry;
+                  bestIndex = index;
+                  return;
+                }
+              }
+
+              // If still no match, use string similarity
               const similarity = stringSimilarity.compareTwoStrings(
-                excelEntry.client.toLowerCase(),
-                sapEntry.CardName.toLowerCase()
+                normalizedExcelName,
+                normalizedSapName
               );
 
               if (similarity > bestScore) {
@@ -198,7 +284,19 @@ class AnalysisController {
             remarks: excelEntry.remarks,
           });
 
-          sapDiscrepancies.splice(bestIndex, 1);
+          // Remove from both discrepancy arrays if found
+          const selectedIndex = sapDiscrepancies.findIndex(
+            (inv) => inv._id === bestMatch._id
+          );
+          if (selectedIndex !== -1) {
+            sapDiscrepancies.splice(selectedIndex, 1);
+          }
+          const extendedIndex = extendedSapDiscrepancies.findIndex(
+            (inv) => inv._id === bestMatch._id
+          );
+          if (extendedIndex !== -1) {
+            extendedSapDiscrepancies.splice(extendedIndex, 1);
+          }
         } else {
           excelDiscrepancies.push({
             date: excelEntry.date,
@@ -211,11 +309,12 @@ class AnalysisController {
       }
 
       // Process POS data separately
-      const sapPOSSales = sapData.filter(
+      const sapPOSSales = selectedRangeSapData.filter(
         (invoice) =>
           invoice.CardCode === "C9999" ||
-          invoice.CardName?.toLowerCase().includes("comptoir") ||
-          invoice.U_EPOSNo != null
+          invoice.paymentMethod?.toLowerCase().includes("POS") ||
+          invoice.U_EPOSNo != null ||
+          invoice.isPOS
       );
 
       // Calculate POS totals from Excel data
@@ -283,18 +382,14 @@ class AnalysisController {
         sapDiscrepanciesCount: sapDiscrepancies.length,
         posComparisonsCount: posDateComparisons.length,
       });
-
-      // In compareData method, update the analysis creation:
+      // Create new analysis document
       const analysis = new Analysis({
         dateRange: {
-          start: startDate,
-          end: endDate,
+          start: selectedStartDate,
+          end: selectedEndDate,
         },
-        // Add the matches map
         matches: groupedMatches,
-        // Add excel discrepancies
         excelDiscrepancies: groupedExcelDiscrepancies,
-        // Add SAP discrepancies
         sapDiscrepancies: sapDiscrepancies.filter(
           (invoice) =>
             !(
@@ -303,7 +398,14 @@ class AnalysisController {
               invoice.U_EPOSNo != null
             )
         ),
-        // Add complete POS analysis
+        extendedSapDiscrepancies: extendedSapDiscrepancies.filter(
+          (invoice) =>
+            !(
+              invoice.CardCode === "C9999" ||
+              invoice.CardName?.toLowerCase().includes("comptoir") ||
+              invoice.U_EPOSNo != null
+            )
+        ),
         posAnalysis: {
           summary: {
             sapPOSTotal,
@@ -315,30 +417,26 @@ class AnalysisController {
           dailyComparisons: posDateComparisons,
         },
       });
-
-      // Initialize the matches Map if empty
+      // Initialize maps if empty
       if (!analysis.matches) {
         analysis.matches = new Map();
       }
-
-      // Convert matches and discrepancies to Maps if they aren't already
       if (!(analysis.matches instanceof Map)) {
         analysis.matches = new Map(Object.entries(groupedMatches));
       }
-
       if (!(analysis.excelDiscrepancies instanceof Map)) {
         analysis.excelDiscrepancies = new Map(
           Object.entries(groupedExcelDiscrepancies)
         );
       }
 
-      // Mark modified to ensure mongoose recognizes the Map changes
       analysis.markModified("matches");
       analysis.markModified("excelDiscrepancies");
 
       await analysis.save();
 
       res.json({
+        analysisId: analysis._id,
         matches: groupedMatches,
         excelDiscrepancies: groupedExcelDiscrepancies,
         sapDiscrepancies: sapDiscrepancies.filter(
@@ -349,16 +447,15 @@ class AnalysisController {
               invoice.U_EPOSNo != null
             )
         ),
-        posAnalysis: {
-          summary: {
-            sapPOSTotal,
-            excelPOSTotal,
-            difference: excelPOSTotal - sapPOSTotal,
-          },
-          sapPOSDetails: sapPOSSales,
-          excelPOSDetails,
-          dailyComparisons: posDateComparisons,
-        },
+        extendedSapDiscrepancies: extendedSapDiscrepancies.filter(
+          (invoice) =>
+            !(
+              invoice.CardCode === "C9999" ||
+              invoice.CardName?.toLowerCase().includes("comptoir") ||
+              invoice.U_EPOSNo != null
+            )
+        ),
+        posAnalysis: analysis.posAnalysis,
       });
     } catch (error) {
       console.error("Analysis error:", error);
@@ -376,45 +473,78 @@ class AnalysisController {
         return res.status(404).json({ error: "Analysis not found" });
       }
 
-      const discrepancies = analysis.excelDiscrepancies.get(category);
+      // Convert Map-like object to Map if necessary
+      let discrepanciesMap = analysis.excelDiscrepancies;
+      if (!(discrepanciesMap instanceof Map)) {
+        discrepanciesMap = new Map(Object.entries(analysis.excelDiscrepancies));
+      }
+
+      const discrepancies = discrepanciesMap.get(category);
       if (!discrepancies || !discrepancies[index]) {
         return res.status(404).json({ error: "Discrepancy not found" });
       }
 
-      // Update the discrepancy with resolution details
-      discrepancies[index].resolved = true;
-      discrepancies[index].resolution = resolution;
-      discrepancies[index].resolvedTimestamp = new Date();
-      discrepancies[index].matchedInvoices = matchedInvoices;
+      // Preserve all original fields when updating the discrepancy
+      const originalDiscrepancy = discrepancies[index];
+      discrepancies[index] = {
+        ...originalDiscrepancy,
+        date: originalDiscrepancy.date,
+        client: originalDiscrepancy.client,
+        amount: originalDiscrepancy.amount,
+        category: originalDiscrepancy.category,
+        remarks: originalDiscrepancy.remarks || "",
+        resolved: true,
+        resolution,
+        resolvedTimestamp: new Date(),
+        matchedInvoices: matchedInvoices.map((inv) => ({
+          _id: inv._id,
+          sapCustomer: inv.sapCustomer,
+          sapAmount: Number(inv.sapAmount),
+          docNum: inv.docNum,
+          docDate: new Date(inv.docDate),
+        })),
+      };
 
-      // Create a new match from the resolved discrepancy
+      // Create new matches
       const newMatches = matchedInvoices.map((invoice) => ({
-        date: discrepancies[index].date,
-        excelClient: discrepancies[index].client,
+        date: new Date(originalDiscrepancy.date),
+        excelClient: originalDiscrepancy.client,
         sapCustomer: invoice.sapCustomer,
-        excelAmount: discrepancies[index].amount,
-        sapAmount: invoice.sapAmount,
-        category: discrepancies[index].category,
-        remarks: discrepancies[index].remarks,
+        excelAmount: Number(originalDiscrepancy.amount),
+        sapAmount: Number(invoice.sapAmount),
+        category: originalDiscrepancy.category, // Make sure to include the category
+        remarks: originalDiscrepancy.remarks || "",
         docNum: invoice.docNum,
-        docDate: invoice.docDate,
+        docDate: new Date(invoice.docDate),
+        isResolved: true,
+        resolution,
       }));
 
-      // Add to matches
-      const categoryMatches = analysis.matches.get(category) || [];
-      categoryMatches.push(...newMatches);
-      analysis.matches.set(category, categoryMatches);
+      // Update matches Map
+      let matchesMap = analysis.matches;
+      if (!(matchesMap instanceof Map)) {
+        matchesMap = new Map(Object.entries(analysis.matches));
+      }
 
-      // Mark as modified since we're updating a Mixed type
-      analysis.markModified("excelDiscrepancies");
+      // Create a new category for resolved matches if it doesn't exist
+      const resolvedCategory = "Resolved and Matched";
+      const resolvedMatches = matchesMap.get(resolvedCategory) || [];
+      resolvedMatches.push(...newMatches);
+      matchesMap.set(resolvedCategory, resolvedMatches);
+
+      // Update analysis document
+      analysis.matches = matchesMap;
+      analysis.excelDiscrepancies = discrepanciesMap;
+
       analysis.markModified("matches");
+      analysis.markModified("excelDiscrepancies");
 
       await analysis.save();
 
       res.json({
         success: true,
-        matches: analysis.matches.get(category),
-        discrepancies: analysis.excelDiscrepancies.get(category),
+        matches: Array.from(matchesMap.get(resolvedCategory) || []),
+        discrepancies: Array.from(discrepanciesMap.get(category) || []),
       });
     } catch (error) {
       console.error("Error resolving discrepancy:", error);

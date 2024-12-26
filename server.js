@@ -11,7 +11,10 @@ const orderRoutes = require("./routes/order.routes");
 const purchaseRoutes = require("./routes/purchase.routes");
 const salesRoutes = require("./routes/sales.routes");
 const AnalysisRoutes = require("./routes/analysis.routes");
-
+const PaymentRoutes = require("./routes/payment.routes");
+const TransactionRoutes = require("./routes/transactions.routes");
+const BankStatementRoutes = require("./routes/bankStatement.routes");
+const TagRoutes = require("./routes/tags.routes");
 dotenv.config();
 
 const app = express();
@@ -44,6 +47,11 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/purchases", purchaseRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/analysis", AnalysisRoutes);
+app.use("/api/payments", PaymentRoutes);
+app.use("/api/transactions", TransactionRoutes);
+app.use("/api/bank-statements", BankStatementRoutes);
+app.use("/api/tags", TagRoutes);
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
