@@ -1,5 +1,5 @@
 const axios = require("axios");
-const Order = require("../models/Order");
+const Order = require("../models/order.model");
 
 class OrderController {
   static async getAllPaginatedData(baseUrl, headers) {

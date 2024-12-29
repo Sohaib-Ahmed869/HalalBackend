@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const bankStatementSchema = new mongoose.Schema({
   operationDate: Date,
@@ -11,10 +11,14 @@ const bankStatementSchema = new mongoose.Schema({
   detail3: String,
   detail4: String,
   detail5: String,
+  verified: {
+    type: Boolean,
+    default: false,
+  },
   uploadDate: {
     type: Date,
-    default: Date.now
-  }
+    default: Date.now,
+  },
 });
 
-module.exports = mongoose.model('BankStatement', bankStatementSchema);
+module.exports = mongoose.model("BankStatement", bankStatementSchema);

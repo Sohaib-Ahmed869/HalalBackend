@@ -1,5 +1,5 @@
 const axios = require("axios");
-const Purchase = require("../models/Purchase");
+const Purchase = require("../models/purchase.model");
 
 class PurchaseController {
   static async getPurchaseOrders(req, res) {
@@ -27,12 +27,12 @@ class PurchaseController {
               await Purchase.create({
                 docEntry: order.DocEntry,
                 verified: false,
-                tag: null
+                tag: null,
               });
               return {
                 status: "stored",
                 docEntry: order.DocEntry,
-                message: "New purchase order stored"
+                message: "New purchase order stored",
               };
             }
             // Attach the tag to the API response
@@ -40,7 +40,7 @@ class PurchaseController {
             return {
               status: "existing",
               docEntry: order.DocEntry,
-              message: "Purchase order already exists"
+              message: "Purchase order already exists",
             };
           } catch (err) {
             console.error(
@@ -57,13 +57,17 @@ class PurchaseController {
       );
 
       // Attach MongoDB data to API response
-      const ordersWithTags = await Promise.all(orders.map(async (order) => {
-        const dbPurchase = await Purchase.findOne({ docEntry: order.DocEntry });
-        return {
-          ...order,
-          tag: dbPurchase?.tag || null
-        };
-      }));
+      const ordersWithTags = await Promise.all(
+        orders.map(async (order) => {
+          const dbPurchase = await Purchase.findOne({
+            docEntry: order.DocEntry,
+          });
+          return {
+            ...order,
+            tag: dbPurchase?.tag || null,
+          };
+        })
+      );
 
       const summary = {
         total: results.length,
@@ -75,7 +79,7 @@ class PurchaseController {
       res.json({
         summary,
         processingResults: results,
-        orders: ordersWithTags
+        orders: ordersWithTags,
       });
     } catch (error) {
       console.error(
@@ -114,9 +118,8 @@ class PurchaseController {
       return res.json({
         message: "Tag updated successfully",
         docEntry,
-        tag: purchase.tag
+        tag: purchase.tag,
       });
-
     } catch (error) {
       console.error("Error adding tag:", error);
       res.status(500).json({
@@ -151,7 +154,7 @@ class PurchaseController {
       res.json({
         message: "Tag removed successfully",
         docEntry,
-        tag: null
+        tag: null,
       });
     } catch (error) {
       console.error("Error removing tag:", error);
