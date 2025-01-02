@@ -141,6 +141,7 @@ class BankStatementController {
     try {
       const buffer = req.file.buffer;
       const fileType = req.file.originalname.split(".").pop().toLowerCase();
+      const bankName = req.body.bankName;
 
       let formattedData = [];
       if (fileType === "pdf") {
@@ -230,6 +231,12 @@ class BankStatementController {
           .status(400)
           .json({ message: "No valid transactions found in the file" });
       }
+
+      // Add bankName to each transaction
+      formattedData = formattedData.map((transaction) => ({
+        ...transaction,
+        bank:bankName, // Add the bank name to each transaction
+      }));
 
       // Store valid transactions in the database
       await BankStatement.insertMany(formattedData);

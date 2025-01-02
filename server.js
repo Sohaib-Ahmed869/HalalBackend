@@ -25,8 +25,10 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
   cors({
-    origin:
-      "http://localhost:5173,http://halalfoods.s3-website.eu-north-1.amazonaws.com/",
+    origin: [
+      "http://localhost:5173",
+      "http://halalfoods.s3-website.eu-north-1.amazonaws.com/",
+    ],
     credentials: true,
   })
 );
