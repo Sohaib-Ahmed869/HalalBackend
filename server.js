@@ -29,18 +29,10 @@ app.use(
       "http://localhost:5173",
       "http://halalfoods.s3-website.eu-north-1.amazonaws.com",
     ],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     credentials: true,
-    methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-      "x-csrf-token",
-      "X-Requested-With",
-      "Accept",
-    ],
+    allowedHeaders: ["Content-Type", "Authorization", "Accept"],
     exposedHeaders: ["Authorization"],
-    preflightContinue: false,
-    optionsSuccessStatus: 204,
   })
 );
 app.use(express.json({ limit: "1000mb" }));
