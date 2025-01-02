@@ -17,7 +17,6 @@ const purchaseSchema = new mongoose.Schema({
   },
   tag: {
     type: String,
-    enum: ["Own Company", "Cash and Carry", "Delivery", "None"],
     default: null
   }
 });

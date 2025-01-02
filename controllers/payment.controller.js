@@ -60,8 +60,8 @@ class PaymentController {
       let errors = [];
       let totalProcessed = 0;
 
-      const startDate = "2023-01-01";
-      const endDate = new Date().toISOString().split("T")[0]; // Current date
+      const startDate = "2024-12-01";
+      const endDate = "2024-12-20";
 
       let nextLink = `${process.env.BASE_URL}/IncomingPayments?$filter=DocDate ge '${startDate}' and DocDate le '${endDate}'&$orderby=DocDate&$skip=1`;
 
