@@ -27,9 +27,20 @@ app.use(
   cors({
     origin: [
       "http://localhost:5173",
-      "http://halalfoods.s3-website.eu-north-1.amazonaws.com/",
+      "http://halalfoods.s3-website.eu-north-1.amazonaws.com",
     ],
     credentials: true,
+    methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "x-csrf-token",
+      "X-Requested-With",
+      "Accept",
+    ],
+    exposedHeaders: ["Authorization"],
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   })
 );
 app.use(express.json({ limit: "1000mb" }));
