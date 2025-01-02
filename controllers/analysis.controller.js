@@ -651,19 +651,20 @@ class AnalysisController {
     try {
       const { analysisId, dateRange } = req.body;
 
+      // 1) Load the analysis
       const analysis = await Analysis.findById(analysisId);
       if (!analysis) {
         return res.status(404).json({ error: "Analysis not found" });
       }
 
-      // Fetch ALL bank statements with valid data
+      // 2) Fetch ALL bank statements
       const allBankStatements = await BankStatement.find({
         amount: { $exists: true, $ne: null },
         operationDate: { $exists: true, $ne: null },
         operationRef: { $exists: true, $ne: null, $ne: "" },
       }).sort({ operationDate: 1 });
 
-      // Filter statements within date range if provided
+      // 3) If dateRange exists, define a filtered subset for display
       const filteredBankStatements = dateRange
         ? allBankStatements.filter((stmt) => {
             const stmtDate = new Date(stmt.operationDate);
@@ -674,14 +675,15 @@ class AnalysisController {
           })
         : allBankStatements;
 
-      // Initialize arrays for both all matches and filtered matches
+      // ----------------------------------------------------------------
+      // 4) We'll gather NEW auto-detected matches and discrepancies
+      //    (We will merge them with old matches later.)
+      // ----------------------------------------------------------------
       const allBankMatches = [];
-      const filteredBankMatches = [];
       const allBankDiscrepancies = [];
-      const filteredBankDiscrepancies = [];
       const unmatchedBank = [...allBankStatements];
 
-      // Helper function to normalize and compare text
+      // Helper to normalize text and compare
       const normalizeAndCompare = (str1, str2) => {
         if (!str1 || !str2) return 0;
         str1 = AnalysisController.normalizeCompanyName(str1);
@@ -689,38 +691,53 @@ class AnalysisController {
         return stringSimilarity.compareTwoStrings(str1, str2);
       };
 
-      // Process all bank statements
-      // Process all bank statements
+      // ----------------------------------------------------------------
+      // 5) Convert Mongoose Map of transactions (analysis.matches) to an object
+      //    so we can safely do `Object.entries(...)`.
+      // ----------------------------------------------------------------
+      let matchesObj = {};
+      if (analysis.matches && typeof analysis.matches.toObject === "function") {
+        // Mongoose Map => plain JS object
+        matchesObj = analysis.matches.toObject();
+      } else if (analysis.matches instanceof Map) {
+        // If it’s a native Map for some reason
+        matchesObj = Object.fromEntries(analysis.matches);
+      } else {
+        // Already a plain object or undefined
+        matchesObj = analysis.matches || {};
+      }
+
+      // 6) Now do the matching logic over ALL bank statements
       for (const bankStmt of allBankStatements) {
         let bestMatch = null;
         let bestScore = 0;
         let matchSource = null;
         let matchType = null;
 
-        // Check Excel matches
+        // ------------------------------------------------------------
+        // (A) Check "Excel" transactions from `analysis.matches`
+        //     Remember: matchesObj => { categoryName: Transaction[] }
+        // ------------------------------------------------------------
         for (const [category, transactions] of Array.from(
           analysis.matches.entries()
         )) {
           for (const txn of transactions) {
             if (txn.isResolved) continue;
-
+            // Compare amounts
             const amountDiff = Math.abs(txn.excelAmount - bankStmt.amount);
             if (amountDiff < 0.01) {
+              // Compare potential names
               const nameScore = Math.max(
                 normalizeAndCompare(bankStmt.comment, txn.excelClient),
                 normalizeAndCompare(bankStmt.detail1, txn.excelClient),
                 normalizeAndCompare(bankStmt.detail2, txn.excelClient)
               );
-
-              // If name score is better than current best, update match
               if (nameScore > bestScore) {
                 bestScore = nameScore;
                 bestMatch = txn;
                 matchSource = "excel";
                 matchType = nameScore > 0.6 ? "amount_and_name" : "amount_only";
-              }
-              // If we only found amount match so far, keep it as a potential match
-              else if (!bestMatch) {
+              } else if (!bestMatch) {
                 bestMatch = txn;
                 bestScore = 0;
                 matchSource = "excel";
@@ -730,35 +747,42 @@ class AnalysisController {
           }
         }
 
-        // Check SAP matches
-        for (const sapTxn of analysis.sapDiscrepancies) {
-          const amountDiff = Math.abs(sapTxn.DocTotal - bankStmt.amount);
-          if (amountDiff < 0.01) {
-            const nameScore = Math.max(
-              normalizeAndCompare(bankStmt.comment, sapTxn.CardName),
-              normalizeAndCompare(bankStmt.detail1, sapTxn.CardName),
-              normalizeAndCompare(bankStmt.detail2, sapTxn.CardName),
-              normalizeAndCompare(bankStmt.operationRef, sapTxn.DocNum),
-              normalizeAndCompare(bankStmt.operationRef, sapTxn.U_EPOSNo)
-            );
-
-            // If name score is better than current best, update match
-            if (nameScore > bestScore) {
-              bestScore = nameScore;
-              bestMatch = sapTxn;
-              matchSource = "sap";
-              matchType = nameScore > 0.6 ? "amount_and_name" : "amount_only";
-            }
-            // If we only found amount match so far, keep it as a potential match
-            else if (!bestMatch) {
-              bestMatch = sapTxn;
-              bestScore = 0;
-              matchSource = "sap";
-              matchType = "amount_only";
+        // ------------------------------------------------------------
+        // (B) Check SAP discrepancies (`analysis.sapDiscrepancies`)
+        // ------------------------------------------------------------
+        if (
+          analysis.sapDiscrepancies &&
+          Array.isArray(analysis.sapDiscrepancies)
+        ) {
+          for (const sapTxn of analysis.sapDiscrepancies) {
+            const amountDiff = Math.abs(sapTxn.DocTotal - bankStmt.amount);
+            if (amountDiff < 0.01) {
+              const nameScore = Math.max(
+                normalizeAndCompare(bankStmt.comment, sapTxn.CardName),
+                normalizeAndCompare(bankStmt.detail1, sapTxn.CardName),
+                normalizeAndCompare(bankStmt.detail2, sapTxn.CardName),
+                normalizeAndCompare(bankStmt.operationRef, sapTxn.DocNum),
+                normalizeAndCompare(bankStmt.operationRef, sapTxn.U_EPOSNo)
+              );
+              if (nameScore > bestScore) {
+                bestScore = nameScore;
+                bestMatch = sapTxn;
+                matchSource = "sap";
+                matchType = nameScore > 0.6 ? "amount_and_name" : "amount_only";
+              } else if (!bestMatch) {
+                bestMatch = sapTxn;
+                bestScore = 0;
+                matchSource = "sap";
+                matchType = "amount_only";
+              }
             }
           }
         }
 
+        // ------------------------------------------------------------
+        // (C) If we found something that matches better than 0
+        //     => create a new BankMatch object
+        // ------------------------------------------------------------
         if (bestMatch) {
           const match = {
             bankStatement: bankStmt,
@@ -771,52 +795,69 @@ class AnalysisController {
             amount: bankStmt.amount,
             date: bankStmt.operationDate,
           };
-
-          // Add to all matches
           allBankMatches.push(match);
 
-          // Add to filtered matches if within date range
-          if (dateRange) {
-            const matchDate = new Date(bankStmt.operationDate);
-            if (
-              matchDate >= new Date(dateRange.start) &&
-              matchDate <= new Date(dateRange.end)
-            ) {
-              filteredBankMatches.push(match);
-            }
-          }
-
-          // Remove from unmatched
-          const index = unmatchedBank.findIndex(
+          // Remove from unmatched if desired
+          const idx = unmatchedBank.findIndex(
             (b) => b._id.toString() === bankStmt._id.toString()
           );
-          if (index !== -1) {
-            unmatchedBank.splice(index, 1);
-          }
+          if (idx !== -1) unmatchedBank.splice(idx, 1);
         } else {
-          const discrepancy = {
+          // No match => discrepancy
+          allBankDiscrepancies.push({
             bankStatement: bankStmt,
             status: "unresolved",
             amount: bankStmt.amount,
             date: bankStmt.operationDate,
-          };
-
-          // Add to all discrepancies
-          allBankDiscrepancies.push(discrepancy);
-
-          // Add to filtered discrepancies if within date range
-          if (dateRange) {
-            const discrepancyDate = new Date(bankStmt.operationDate);
-            if (
-              discrepancyDate >= new Date(dateRange.start) &&
-              discrepancyDate <= new Date(dateRange.end)
-            ) {
-              filteredBankDiscrepancies.push(discrepancy);
-            }
-          }
+          });
         }
       }
-      // Calculate summaries for both all data and filtered data
+
+      // ----------------------------------------------------------------
+      // 7) Build “filtered” sets if dateRange is specified
+      // ----------------------------------------------------------------
+      const filteredBankMatches = [];
+      const filteredBankDiscrepancies = [];
+      if (dateRange) {
+        const startDate = new Date(dateRange.start);
+        const endDate = new Date(dateRange.end);
+
+        for (const m of allBankMatches) {
+          const matchDate = new Date(m.bankStatement.operationDate);
+          if (matchDate >= startDate && matchDate <= endDate) {
+            filteredBankMatches.push(m);
+          }
+        }
+        for (const d of allBankDiscrepancies) {
+          const discrepancyDate = new Date(d.bankStatement.operationDate);
+          if (discrepancyDate >= startDate && discrepancyDate <= endDate) {
+            filteredBankDiscrepancies.push(d);
+          }
+        }
+      } else {
+        // If no date range, "filtered" just equals "all"
+        filteredBankMatches.push(...allBankMatches);
+        filteredBankDiscrepancies.push(...allBankDiscrepancies);
+      }
+
+      // ----------------------------------------------------------------
+      // 8) Summaries for the filtered sets
+      // ----------------------------------------------------------------
+      const filteredSummary = {
+        totalTransactions: filteredBankStatements.length,
+        matchedCount: filteredBankMatches.length,
+        unmatchedCount: filteredBankDiscrepancies.length,
+        totalAmount: filteredBankStatements.reduce(
+          (sum, stmt) => sum + stmt.amount,
+          0
+        ),
+        matchedAmount: filteredBankMatches.reduce(
+          (sum, match) => sum + match.amount,
+          0
+        ),
+      };
+
+      // 9) Summaries for ALL data
       const allDataSummary = {
         totalTransactions: allBankStatements.length,
         matchedCount: allBankMatches.length,
@@ -831,54 +872,130 @@ class AnalysisController {
         ),
       };
 
-      const filteredSummary = dateRange
-        ? {
-            totalTransactions: filteredBankStatements.length,
-            matchedCount: filteredBankMatches.length,
-            unmatchedCount: filteredBankDiscrepancies.length,
-            totalAmount: filteredBankStatements.reduce(
-              (sum, stmt) => sum + stmt.amount,
-              0
-            ),
-            matchedAmount: filteredBankMatches.reduce(
-              (sum, match) => sum + match.amount,
-              0
-            ),
-          }
-        : allDataSummary;
+      // ----------------------------------------------------------------
+      // 10) Merge newly found matches with old matches already stored
+      //     in analysis.bankReconciliation
+      // ----------------------------------------------------------------
 
-      // Update analysis with complete data
+      // (A) Load old matches
+      let oldMatches = [];
+      if (
+        analysis.bankReconciliation &&
+        Array.isArray(analysis.bankReconciliation.matches)
+      ) {
+        oldMatches = analysis.bankReconciliation.matches;
+      }
+
+      // (B) Make a set of old matched bankStatement IDs
+      const oldMatchedIds = new Set(
+        oldMatches.map((m) => m.bankStatement?._id?.toString())
+      );
+
+      // (C) Filter new matches so we don't double-match the same statement
+      const newUniqueMatches = [];
+      for (const nm of allBankMatches) {
+        const bankId = nm.bankStatement?._id?.toString();
+        if (!oldMatchedIds.has(bankId)) {
+          newUniqueMatches.push(nm);
+        }
+      }
+
+      // (D) Final merged array
+      const mergedAllMatches = [...oldMatches, ...newUniqueMatches];
+
+      // (E) Rebuild allDiscrepancies to exclude matched ones
+      const matchedBankIds = new Set(
+        mergedAllMatches.map((m) => m.bankStatement._id.toString())
+      );
+      const finalAllDiscrepancies = allBankStatements
+        .filter((stmt) => !matchedBankIds.has(stmt._id.toString()))
+        .map((stmt) => ({
+          bankStatement: stmt,
+          status: "unresolved",
+          amount: stmt.amount,
+          date: stmt.operationDate,
+        }));
+
+      // (F) Rebuild filtered sets from the mergedAllMatches, finalAllDiscrepancies
+      const mergedFilteredMatches = [];
+      const mergedFilteredDiscrepancies = [];
+
+      if (dateRange) {
+        const startDate = new Date(dateRange.start);
+        const endDate = new Date(dateRange.end);
+
+        // Filter mergedAllMatches
+        for (const m of mergedAllMatches) {
+          const d = new Date(m.bankStatement.operationDate);
+          if (d >= startDate && d <= endDate) {
+            mergedFilteredMatches.push(m);
+          }
+        }
+        // Filter finalAllDiscrepancies
+        for (const dd of finalAllDiscrepancies) {
+          const dateD = new Date(dd.bankStatement.operationDate);
+          if (dateD >= startDate && dateD <= endDate) {
+            mergedFilteredDiscrepancies.push(dd);
+          }
+        }
+      } else {
+        // No dateRange => all
+        mergedFilteredMatches.push(...mergedAllMatches);
+        mergedFilteredDiscrepancies.push(...finalAllDiscrepancies);
+      }
+
+      // (G) Build updated summary for merged filtered sets
+      const mergedFilteredSummary = {
+        totalTransactions: filteredBankStatements.length,
+        matchedCount: mergedFilteredMatches.length,
+        unmatchedCount: mergedFilteredDiscrepancies.length,
+        totalAmount: filteredBankStatements.reduce(
+          (sum, stmt) => sum + stmt.amount,
+          0
+        ),
+        matchedAmount: mergedFilteredMatches.reduce(
+          (sum, match) => sum + match.amount,
+          0
+        ),
+      };
+
+      // ----------------------------------------------------------------
+      // 11) Finally, save everything back into analysis.bankReconciliation
+      // ----------------------------------------------------------------
       analysis.bankReconciliation = {
-        allMatches: allBankMatches,
-        allDiscrepancies: allBankDiscrepancies,
-        filteredMatches: filteredBankMatches,
-        filteredDiscrepancies: filteredBankDiscrepancies,
-        summary: filteredSummary,
-        allDataSummary: allDataSummary,
+        matches: mergedAllMatches,
+        discrepancies: finalAllDiscrepancies,
+        summary: mergedFilteredSummary,
         lastUpdated: new Date(),
+        allDataSummary, // optional
+        filteredMatches: mergedFilteredMatches, // optional
+        filteredDiscrepancies: mergedFilteredDiscrepancies, // optional
       };
 
       await analysis.save();
 
-      // Return filtered data for display
-      res.json({
-        allMatches: allBankMatches,
-        allDiscrepancies: allBankDiscrepancies,
-        filteredMatches: filteredBankMatches,
-        filteredDiscrepancies: filteredBankDiscrepancies,
-        discrepancies: dateRange
-          ? filteredBankDiscrepancies
-          : allBankDiscrepancies,
-        summary: filteredSummary,
-        allDataSummary: allDataSummary,
+      // ----------------------------------------------------------------
+      // 12) Respond with the arrays your frontend needs
+      // ----------------------------------------------------------------
+      return res.json({
+        // Merged final arrays (for entire DB range)
+        allMatches: mergedAllMatches,
+        allDiscrepancies: finalAllDiscrepancies,
+        // Merged filtered arrays (for date range, if any)
+        filteredMatches: mergedFilteredMatches,
+        filteredDiscrepancies: mergedFilteredDiscrepancies,
+        // Summaries
+        summary: mergedFilteredSummary,
+        allDataSummary,
       });
     } catch (error) {
       console.error("Bank reconciliation error:", error);
-      res.status(500).json({
+      return res.status(500).json({
         error: "Bank reconciliation failed: " + error.message,
       });
     }
   }
+
   static async resolveBankDiscrepancy(req, res) {
     try {
       const { analysisId, bankStatementId, resolution, matchedTransactions } =
@@ -1588,7 +1705,9 @@ class AnalysisController {
       if (!analysis.bankReconciliation.matches) {
         analysis.bankReconciliation.matches = [];
       }
+      console.log("Adding match", match);
       analysis.bankReconciliation.matches.push(match);
+      console.log("Added");
 
       // Remove from discrepancies if it exists
       if (analysis.bankReconciliation.discrepancies) {

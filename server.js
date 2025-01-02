@@ -32,6 +32,10 @@ app.use(
 app.use(express.json({ limit: "1000mb" }));
 app.use(express.urlencoded({ limit: "1000mb", extended: true }));
 
+app.get("/", (req, res) => {
+  res.send("Hello World from Halal Foods!");
+});
+
 // Connect to MongoDB
 mongoose
   .connect(process.env.MONGO_URL, {
@@ -55,8 +59,6 @@ app.use("/api/bank-statements", BankStatementRoutes);
 app.use("/api/credit-notes", CreditNoteRoutes);
 app.use("/api/returns", ReturnsRoutes);
 app.use("/api/tags", TagRoutes);
-
-
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
