@@ -36,8 +36,8 @@ app.use(
     exposedHeaders: ["Authorization"],
   })
 );
-app.use(express.json({ limit: "1000mb" }));
-app.use(express.urlencoded({ limit: "1000mb", extended: true }));
+app.use(express.json({ limit: "10000mb" }));
+app.use(express.urlencoded({ limit: "10000mb", extended: true }));
 
 app.get("/", (req, res) => {
   res.send("Hello World from Halal Foods!");
