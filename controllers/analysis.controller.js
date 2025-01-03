@@ -3,6 +3,7 @@ const Invoice = require("../models/invoice.model");
 const Analysis = require("../models/analysis.model");
 const BankStatement = require("../models/bankStatement.model");
 const Payment = require("../models/payment.model");
+const Sale = require("../models/sales.model");
 class AnalysisController {
   static normalizeCompanyName(name) {
     if (!name) return "";
@@ -403,6 +404,15 @@ class AnalysisController {
         sapDiscrepanciesCount: sapDiscrepancies.length,
         posComparisonsCount: posDateComparisons.length,
       });
+
+      const processedSapDiscrepancies = sapDiscrepancies.map((invoice) => ({
+        ...invoice,
+        potentialMatches: AnalysisController.findPotentialExcelMatches(
+          invoice,
+          flattenedExcelData
+        ),
+      }));
+
       // Create new analysis document
       const analysis = new Analysis({
         dateRange: {
@@ -411,7 +421,7 @@ class AnalysisController {
         },
         matches: groupedMatches,
         excelDiscrepancies: groupedExcelDiscrepancies,
-        sapDiscrepancies: sapDiscrepancies.filter(
+        sapDiscrepancies: processedSapDiscrepancies.filter(
           (invoice) =>
             !(
               invoice.CardCode === "C9999" ||
@@ -586,7 +596,6 @@ class AnalysisController {
     }
   }
 
-  // Add to AnalysisController.js
   static async getAnalyses(req, res) {
     try {
       const { start, end } = req.query;
@@ -631,6 +640,7 @@ class AnalysisController {
       res.status(500).json({ error: error.message });
     }
   }
+
   static async getAnalysisById(req, res) {
     try {
       const { id } = req.params;
@@ -1737,6 +1747,294 @@ class AnalysisController {
       });
     } catch (error) {
       console.error("Error matching to bank:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async resolveSAPDiscrepancy(req, res) {
+    try {
+      const { analysisId, sapInvoiceId, resolution, matchedTransactions } =
+        req.body;
+
+      const analysis = await Analysis.findById(analysisId);
+      if (!analysis) {
+        return res.status(404).json({ error: "Analysis not found" });
+      }
+
+      // Find the SAP discrepancy to resolve
+      const discrepancyIndex = analysis.sapDiscrepancies.findIndex(
+        (d) => d._id.toString() === sapInvoiceId
+      );
+
+      if (discrepancyIndex === -1) {
+        return res.status(404).json({ error: "SAP discrepancy not found" });
+      }
+
+      // Get the original discrepancy
+      const originalDiscrepancy = analysis.sapDiscrepancies[discrepancyIndex];
+
+      // Update the selected Excel transactions as verified
+      for (const match of matchedTransactions) {
+        if (match.originalEntry) {
+          // Find the sale document
+          const sale = await Sale.findOne({ date: match.date });
+          if (sale) {
+            // Update the verified status based on category
+            if (match.category.startsWith("POS")) {
+              // Handle POS categories
+              const posCategory = {
+                "POS CB": "Caisse CB",
+                "POS Espèces": "Caisse Espèces",
+                "POS Chèques": "Caisse chèques",
+              }[match.category];
+
+              const entryIndex = sale.POS[posCategory].findIndex(
+                (e) => e.client === match.client && e.amount === match.amount
+              );
+              if (entryIndex !== -1) {
+                sale.POS[posCategory][entryIndex].verified = true;
+              }
+            } else {
+              // Handle regular categories
+              const entryIndex = sale[match.category].findIndex(
+                (e) =>
+                  e.client === match.client &&
+                  (e.amount === match.amount || e.bank === match.amount)
+              );
+              if (entryIndex !== -1) {
+                sale[match.category][entryIndex].verified = true;
+              }
+            }
+            await sale.save();
+          }
+        }
+      }
+
+      // Update the discrepancy with resolution info AND include matched SAP invoice
+      analysis.sapDiscrepancies[discrepancyIndex] = {
+        // Keep all original SAP invoice fields
+        DocDate: originalDiscrepancy.DocDate,
+        CardName: originalDiscrepancy.CardName,
+        DocTotal: originalDiscrepancy.DocTotal,
+        CardCode: originalDiscrepancy.CardCode,
+        U_EPOSNo: originalDiscrepancy.U_EPOSNo,
+        DocNum: originalDiscrepancy.DocNum,
+        _id: originalDiscrepancy._id,
+        source: originalDiscrepancy.source || "sap",
+
+        // Add resolution fields
+        resolved: true,
+        resolution,
+        resolvedTimestamp: new Date(),
+        matchedTransactions: [
+          // Include the SAP invoice details
+          {
+            date: originalDiscrepancy.DocDate,
+            client: originalDiscrepancy.CardName,
+            amount: originalDiscrepancy.DocTotal,
+            docNum: originalDiscrepancy.DocNum,
+            category: "SAP Invoice",
+            type: "sap",
+            remarks: resolution || "",
+          },
+          // Then include the Excel matches
+          ...matchedTransactions.map((tx) => ({
+            date: tx.date,
+            client: tx.client,
+            amount: Number(tx.amount),
+            category: tx.category,
+            type: "excel",
+            remarks: tx.remarks || "",
+          })),
+        ],
+      };
+
+      // Create new matches
+      const newMatches = matchedTransactions.map((tx) => ({
+        date: new Date(tx.date),
+        excelClient: tx.client,
+        sapCustomer: originalDiscrepancy.CardName,
+        excelAmount: Number(tx.amount),
+        sapAmount: Number(originalDiscrepancy.DocTotal),
+        category: tx.category,
+        remarks: tx.remarks || "",
+        docNum: originalDiscrepancy.DocNum,
+        docDate: originalDiscrepancy.DocDate,
+        isResolved: true,
+        resolution,
+        type: "sap_to_excel",
+      }));
+
+      // Update matches Map
+      let matchesMap = analysis.matches;
+      if (!(matchesMap instanceof Map)) {
+        matchesMap = new Map(Object.entries(analysis.matches));
+      }
+
+      const resolvedCategory = "SAP Resolved Matches";
+      const resolvedMatches = matchesMap.get(resolvedCategory) || [];
+      resolvedMatches.push(...newMatches);
+      matchesMap.set(resolvedCategory, resolvedMatches);
+
+      // Update analysis document
+      analysis.matches = matchesMap;
+
+      analysis.markModified("matches");
+      analysis.markModified("sapDiscrepancies");
+
+      await analysis.save();
+
+      res.json({
+        success: true,
+        matches: Array.from(matchesMap.get(resolvedCategory) || []),
+        sapDiscrepancies: analysis.sapDiscrepancies,
+      });
+    } catch (error) {
+      console.error("Error resolving SAP discrepancy:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async findPotentialExcelMatches(sapInvoice) {
+    try {
+      // Calculate date range (±20 days)
+      const sapDate = new Date(sapInvoice.DocDate);
+      const startDate = new Date(sapDate);
+      const endDate = new Date(sapDate);
+      startDate.setDate(startDate.getDate() - 20);
+      endDate.setDate(endDate.getDate() + 20);
+
+      // Fetch sales data within the date range
+      const salesData = await Sale.find({
+        date: {
+          $gte: startDate,
+          $lte: endDate,
+        },
+      }).sort({ date: 1 });
+
+      const potentialMatches = [];
+
+      // Helper function to process each entry
+      const processEntry = (entry, category, date) => {
+        // Skip if this is a total entry
+        if (
+          entry.client?.toLowerCase() === "total" ||
+          entry.client?.toLowerCase() === "client" ||
+          entry.client === "TOTAL ESPECES" ||
+          entry.client === "TOTAL CHEQUES" ||
+          entry.client === "TOTAL CB Internet & Phone"
+        ) {
+          return;
+        }
+
+        // Calculate amount difference
+        const amount = entry.bank || entry.amount || 0;
+        const amountDiff = Math.abs(amount - sapInvoice.DocTotal);
+        const amountTolerance = sapInvoice.DocTotal * 0.3; // 10% tolerance
+
+        if (amountDiff <= amountTolerance) {
+          // Calculate name similarity
+          const similarity = stringSimilarity.compareTwoStrings(
+            AnalysisController.normalizeCompanyName(entry.client),
+            AnalysisController.normalizeCompanyName(sapInvoice.CardName)
+          );
+
+          potentialMatches.push({
+            date,
+            client: entry.client,
+            amount,
+            category,
+            remarks: entry.remarks || "",
+            similarity,
+            originalEntry: entry,
+          });
+        }
+      };
+
+      // Process each day's data
+      salesData.forEach((dayData) => {
+        // Process regular payment categories
+        const categories = [
+          "Paiements Chèques",
+          "Paiements Espèces",
+          "Paiements CB Site",
+          "Paiements CB Téléphone",
+          "Virements",
+          "Livraisons non payées",
+        ];
+
+        categories.forEach((category) => {
+          if (Array.isArray(dayData[category])) {
+            dayData[category].forEach((entry) =>
+              processEntry(entry, category, dayData.date)
+            );
+          }
+        });
+
+        // Process POS categories
+        if (dayData.POS) {
+          const posCategories = {
+            "Caisse CB": "POS CB",
+            "Caisse Espèces": "POS Espèces",
+            "Caisse chèques": "POS Chèques",
+          };
+
+          Object.entries(posCategories).forEach(([key, category]) => {
+            if (Array.isArray(dayData.POS[key])) {
+              dayData.POS[key].forEach((entry) =>
+                processEntry(entry, category, dayData.date)
+              );
+            }
+          });
+        }
+      });
+
+      // Sort by similarity and amount difference, then return top matches
+      return potentialMatches
+        .sort((a, b) => {
+          if (Math.abs(b.similarity - a.similarity) < 0.6) {
+            // If similarities are close, prefer closer amounts
+            const aDiff = Math.abs(a.amount - sapInvoice.DocTotal);
+            const bDiff = Math.abs(b.amount - sapInvoice.DocTotal);
+            return aDiff - bDiff;
+          }
+          return b.similarity - a.similarity;
+        })
+        .slice(0, 5); // Return top 5 matches
+    } catch (error) {
+      console.error("Error finding potential Excel matches:", error);
+      return [];
+    }
+  }
+
+  static async findPotentialExcelMatchesForSAP(req, res) {
+    try {
+      const { analysisId, sapInvoiceId } = req.body;
+
+      const analysis = await Analysis.findById(analysisId);
+      if (!analysis) {
+        console.log("SAP analysis not found");
+
+        return res.status(404).json({ error: "Analysis not found" });
+      }
+
+      // Find the SAP invoice
+      const sapInvoice = analysis.sapDiscrepancies.find(
+        (d) => d._id.toString() === sapInvoiceId
+      );
+
+      if (!sapInvoice) {
+        console.log("SAP invoice not found");
+        return res.status(404).json({ error: "SAP invoice not found" });
+      }
+
+      // Get potential matches
+      const potentialMatches =
+        await AnalysisController.findPotentialExcelMatches(sapInvoice);
+
+      res.json({ potentialMatches });
+    } catch (error) {
+      console.error("Error finding potential matches:", error);
       res.status(500).json({ error: error.message });
     }
   }

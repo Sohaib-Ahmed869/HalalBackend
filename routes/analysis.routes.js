@@ -12,6 +12,7 @@ router.get("/stats/:analysisId", AnalysisController.getAnalysisStats);
 router.get("/matched-stats/:analysisId", AnalysisController.getMatchedStats);
 router.post('/check-resolutions', AnalysisController.checkInvoiceResolutions);
 router.post('/match-to-bank', AnalysisController.matchToBank);
-
+router.post('/resolve-sap-discrepancy', AnalysisController.resolveSAPDiscrepancy);
+router.post('/find-potential-excel-matches', AnalysisController.findPotentialExcelMatchesForSAP);
 
 module.exports = router;
