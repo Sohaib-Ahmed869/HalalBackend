@@ -19,13 +19,14 @@ class PurchaseController {
         verified: purchase.verified ? "Yes" : "No",
       }));
 
-      res.json(formattedPurchases);
+      res.json({
+        data: formattedPurchases,
+        orders: formattedPurchases, // matching frontend structure
+      });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch purchases" });
     }
   }
-
-  
 
   static async addTag(req, res) {
     try {
