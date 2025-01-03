@@ -4,88 +4,34 @@ const Purchase = require("../models/Purchase");
 class PurchaseController {
   static async getPurchaseOrders(req, res) {
     try {
-      const response = await axios.get(
-        `${process.env.BASE_URL}/PurchaseOrders`,
-        {
-          headers: {
-            Cookie: req.headers.cookie,
-          },
-        }
-      );
+      const {
+        page = 1,
+        limit = 100,
+        sortField = "docEntry",
+        sortOrder = -1,
+      } = req.query;
+      const skip = (page - 1) * limit;
 
-      // Process each purchase order
-      const orders = response.data.value;
-      const results = await Promise.all(
-        orders.map(async (order) => {
-          try {
-            const existingPurchase = await Purchase.findOne({
-              docEntry: order.DocEntry,
-            });
+      const purchases = await Purchase.find()
+        .sort({ [sortField]: sortOrder })
+        .skip(skip)
+        .limit(limit)
+        .lean();
 
-            if (!existingPurchase) {
-              // Store new purchase
-              await Purchase.create({
-                docEntry: order.DocEntry,
-                verified: false,
-                tag: null
-              });
-              return {
-                status: "stored",
-                docEntry: order.DocEntry,
-                message: "New purchase order stored"
-              };
-            }
-            // Attach the tag to the API response
-            order.tag = existingPurchase.tag;
-            return {
-              status: "existing",
-              docEntry: order.DocEntry,
-              message: "Purchase order already exists"
-            };
-          } catch (err) {
-            console.error(
-              `Error processing purchase order ${order.DocEntry}:`,
-              err
-            );
-            return {
-              status: "error",
-              docEntry: order.DocEntry,
-              message: err.message,
-            };
-          }
-        })
-      );
-
-      // Attach MongoDB data to API response
-      const ordersWithTags = await Promise.all(orders.map(async (order) => {
-        const dbPurchase = await Purchase.findOne({ docEntry: order.DocEntry });
-        return {
-          ...order,
-          tag: dbPurchase?.tag || null
-        };
-      }));
-
-      const summary = {
-        total: results.length,
-        stored: results.filter((r) => r.status === "stored").length,
-        existing: results.filter((r) => r.status === "existing").length,
-        errors: results.filter((r) => r.status === "error").length,
-      };
+      const total = await Purchase.countDocuments();
 
       res.json({
-        summary,
-        processingResults: results,
-        orders: ordersWithTags
+        data: purchases,
+        metadata: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(total / limit),
+          totalRecords: total,
+          limit: parseInt(limit),
+        },
       });
     } catch (error) {
-      console.error(
-        "Error fetching purchase orders:",
-        error.response?.data || error.message
-      );
-      res.status(500).json({
-        error: "Failed to fetch purchase orders",
-        details: error.response?.data || error.message,
-      });
+      console.error("Error fetching purchases:", error);
+      res.status(500).json({ error: "Failed to fetch purchases" });
     }
   }
 
@@ -114,9 +60,8 @@ class PurchaseController {
       return res.json({
         message: "Tag updated successfully",
         docEntry,
-        tag: purchase.tag
+        tag: purchase.tag,
       });
-
     } catch (error) {
       console.error("Error adding tag:", error);
       res.status(500).json({
@@ -151,7 +96,7 @@ class PurchaseController {
       res.json({
         message: "Tag removed successfully",
         docEntry,
-        tag: null
+        tag: null,
       });
     } catch (error) {
       console.error("Error removing tag:", error);
