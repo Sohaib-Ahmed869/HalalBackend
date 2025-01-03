@@ -4,36 +4,28 @@ const Purchase = require("../models/Purchase");
 class PurchaseController {
   static async getPurchaseOrders(req, res) {
     try {
-      const {
-        page = 1,
-        limit = 100,
-        sortField = "docEntry",
-        sortOrder = -1,
-      } = req.query;
-      const skip = (page - 1) * limit;
+      const purchases = await Purchase.find().lean();
 
-      const purchases = await Purchase.find()
-        .sort({ [sortField]: sortOrder })
-        .skip(skip)
-        .limit(limit)
-        .lean();
+      const formattedPurchases = purchases.map((purchase) => ({
+        customerName: purchase.CardName || "",
+        invoiceNum: purchase.DocNum || "",
+        creationDate: purchase.CreateDate || "",
+        transactionDate: purchase.DocDate || "",
+        transactionNum: purchase.DocEntry || "",
+        amount: purchase.DocTotal || 0,
+        documentNum: purchase.docEntry || "",
+        method: purchase.PaymentMethod || "",
+        tag: purchase.tag || null,
+        verified: purchase.verified ? "Yes" : "No",
+      }));
 
-      const total = await Purchase.countDocuments();
-
-      res.json({
-        data: purchases,
-        metadata: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(total / limit),
-          totalRecords: total,
-          limit: parseInt(limit),
-        },
-      });
+      res.json(formattedPurchases);
     } catch (error) {
-      console.error("Error fetching purchases:", error);
       res.status(500).json({ error: "Failed to fetch purchases" });
     }
   }
+
+  
 
   static async addTag(req, res) {
     try {
