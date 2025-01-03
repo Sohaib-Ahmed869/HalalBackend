@@ -19,6 +19,8 @@ class PurchaseController {
         verified: purchase.verified ? "Yes" : "No",
       }));
 
+      console.log("Formatted purchases:", formattedPurchases);
+
       res.json({
         data: formattedPurchases,
         orders: formattedPurchases, // matching frontend structure
