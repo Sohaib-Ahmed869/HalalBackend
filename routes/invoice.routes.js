@@ -22,8 +22,13 @@ router.patch("/:DocEntry/verify", InvoiceController.toggleVerified);
 router.get("/customer-stats", InvoiceController.getCustomerStats);
 router.get("/by-customer", InvoiceController.getCustomerInvoices);
 
-router.get('/dashboard-stats', InvoiceController.getDashboardStats);
+router.get("/dashboard-stats", InvoiceController.getDashboardStats);
 
-router.put('/customer', InvoiceController.updateCustomerTag);
+router.put("/customer", InvoiceController.updateCustomerTag);
+
+router.put(
+  "/update-paymentMethods-POS",
+  InvoiceController.updatePOSPaymentMethods
+);
 
 module.exports = router;

@@ -160,12 +160,6 @@ class AnalysisController {
       selectedStartDate.setHours(0, 0, 0, 0);
       selectedEndDate.setHours(23, 59, 59, 999);
 
-      // Extended date range (for matching purposes)
-      const extendedStartDate = new Date(selectedStartDate);
-      const extendedEndDate = new Date(selectedEndDate);
-      extendedStartDate.setDate(extendedStartDate.getDate() - 50);
-      extendedEndDate.setDate(extendedEndDate.getDate() + 50);
-
       // Check if analysis already exists for this date range
       const existingAnalysis = await Analysis.findOne({
         "dateRange.start": selectedStartDate,
@@ -183,21 +177,24 @@ class AnalysisController {
           posAnalysis: existingAnalysis.posAnalysis,
         });
       }
+      // Extended date range (for matching purposes)
+      const extendedStartDate = new Date(selectedStartDate);
+      const extendedEndDate = new Date(selectedEndDate);
+      extendedStartDate.setDate(extendedStartDate.getDate() - 50);
+      extendedEndDate.setDate(extendedEndDate.getDate() + 50);
 
       // Fetch invoices and payments from SAP
       const sapInvoices = await Invoice.find({
         DocDate: { $gte: extendedStartDate, $lte: extendedEndDate },
       }).lean();
-      const sapPayments = await Payment.find({
-        DocDate: { $gte: extendedStartDate, $lte: extendedEndDate },
-      }).lean();
+      const sapPayments = [];
 
       const flattenedPayments = sapPayments.map(
         AnalysisController.flattenPaymentData
       );
 
       // Fetch SAP invoices for extended date range
-      const allSapData = [...sapInvoices, ...flattenedPayments];
+      const allSapData = [...sapInvoices];
 
       // Filter SAP data for selected date range
       const selectedRangeSapData = allSapData.filter((invoice) => {

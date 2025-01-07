@@ -36,8 +36,13 @@ app.use(
     exposedHeaders: ["Authorization"],
   })
 );
-app.use(express.json({ limit: "10000mb" }));
-app.use(express.urlencoded({ limit: "10000mb", extended: true }));
+app.use(express.json({ limit: "100mb" }));
+app.use(express.urlencoded({ limit: "100mb", extended: true }));
+
+// Add body-parser with increased limits
+const bodyParser = require("body-parser");
+app.use(bodyParser.json({ limit: "100mb" }));
+app.use(bodyParser.urlencoded({ limit: "100mb", extended: true }));
 
 app.get("/", (req, res) => {
   res.send("Hello World from Halal Foods!");

@@ -116,7 +116,7 @@ router.get("/", async (req, res) => {
     }
 
     const startDate = new Date(start);
-    startDate.setDate(startDate.getDate() - 1);
+    startDate.setDate(startDate.getDate());
     const endDate = new Date(end);
     endDate.setHours(23, 59, 59, 999);
 

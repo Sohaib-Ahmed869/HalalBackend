@@ -132,19 +132,17 @@ const POSDetailsSchema = new mongoose.Schema({
 const SAPInvoiceSchema = new mongoose.Schema({
   DocDate: {
     type: Date,
-    required: true,
   },
   CardName: {
     type: String,
-    required: true,
   },
   DocTotal: {
     type: Number,
-    required: true,
   },
   CardCode: String,
   U_EPOSNo: String,
   DocNum: String,
+  paymentMethod: String,
   _id: mongoose.Schema.Types.ObjectId,
   source: {
     type: String,

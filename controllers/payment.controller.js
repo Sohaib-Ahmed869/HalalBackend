@@ -1,6 +1,13 @@
 const axios = require("axios");
 const Payment = require("../models/payment.model");
+const multer = require("multer");
+const csv = require("csv-parser");
+const fs = require("fs");
 
+const upload = multer({
+  dest: "uploads/",
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit
+});
 class PaymentController {
   static async getPayments(req, res) {
     try {
@@ -233,6 +240,177 @@ class PaymentController {
       res.status(500).json({ error: "Failed to toggle payment verification" });
     }
   }
+  static async processCSV(req, res) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const batchSize = 500;
+      let processedCount = 0;
+      let records = [];
+      let totalProcessed = 0;
+      let errors = [];
+      let rowNumber = 0;
+
+      // Helper function to parse DD/MM/YY date format
+      const parseDate = (dateStr) => {
+        const [day, month, year] = dateStr.split("/");
+        return new Date(`20${year}-${month}-${day}`);
+      };
+
+      const processingPromise = new Promise((resolve, reject) => {
+        const stream = fs
+          .createReadStream(req.file.path, { encoding: "utf16le" })
+          .pipe(
+            csv({
+              skipEmptyLines: true,
+              trim: true,
+              headers: [
+                "#",
+                "Creation Date",
+                "Customer/Supplier No.",
+                "Internal Number",
+                "Customer/Supplier Name",
+                "Document Number",
+                "Posting Date",
+                "Cash Amount",
+                "Credit Amount",
+                "Cheque Amount",
+                "Transfer Amount",
+                "Document Total",
+                "Transaction Number",
+                "User Signature",
+              ],
+              skipLines: 1,
+            })
+          );
+
+        stream.on("data", async (row) => {
+          rowNumber++;
+          try {
+            const cleanAmount = (amount) => {
+              return parseFloat(amount.replace(/[^\d.-]/g, "")) || 0;
+            };
+
+            const payment = {
+              DocEntry: parseInt(row["Internal Number"]),
+              DocNum: parseInt(row["Document Number"]),
+              DocDate: parseDate(row["Posting Date"]),
+              CardCode: row["Customer/Supplier No."],
+              CardName: row["Customer/Supplier Name"],
+              CashSum: cleanAmount(row["Cash Amount"]),
+              CreditSum: cleanAmount(row["Credit Amount"]),
+              TransferSum: cleanAmount(row["Transfer Amount"]),
+              CheckSum: cleanAmount(row["Cheque Amount"]),
+              DocTotal: cleanAmount(row["Document Total"]),
+              CreationDate: parseDate(row["Creation Date"]),
+              TransactionNumber: row["Transaction Number"],
+              UserSignature: row["User Signature"],
+              verified: false,
+              dateStored: new Date(),
+            };
+
+            records.push(payment);
+            processedCount++;
+
+            // Process every 500 records
+            if (records.length === batchSize) {
+              await saveRecords(records);
+              totalProcessed += records.length;
+              console.log(`Processed and saved ${totalProcessed} payments`);
+              records = []; // Clear the array after saving
+            }
+          } catch (error) {
+            errors.push({
+              row: {
+                rowNumber,
+                data: row,
+              },
+              error: error.message,
+            });
+          }
+        });
+
+        stream.on("end", async () => {
+          try {
+            // Save any remaining records
+            if (records.length > 0) {
+              await saveRecords(records);
+              totalProcessed += records.length;
+            }
+
+            // Clean up uploaded file
+            fs.unlink(req.file.path, (err) => {
+              if (err) console.error("Error deleting file:", err);
+            });
+
+            resolve({
+              totalProcessed,
+              errors,
+            });
+          } catch (error) {
+            reject(error);
+          }
+        });
+
+        stream.on("error", (error) => {
+          console.error("Stream error:", error);
+          reject(error);
+        });
+      });
+
+      const result = await processingPromise;
+
+      res.json({
+        message: "CSV processing completed",
+        stats: {
+          totalProcessed: result.totalProcessed,
+          errorsCount: result.errors.length,
+        },
+        errors:
+          result.errors.length > 0 ? result.errors.slice(0, 10) : undefined,
+      });
+    } catch (error) {
+      console.error("Error processing CSV:", error);
+      if (req.file && req.file.path) {
+        fs.unlink(req.file.path, (err) => {
+          if (err) console.error("Error deleting file:", err);
+        });
+      }
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to process CSV file" });
+    }
+  }
+
+  // Helper function to process a batch of payments
+}
+async function saveRecords(records) {
+  try {
+    for (const record of records) {
+      try {
+        await Payment.findOneAndUpdate(
+          { DocEntry: record.DocEntry },
+          { $set: record },
+          { upsert: true, new: true }
+        );
+      } catch (error) {
+        console.error(`Error saving payment ${record.DocEntry}:`, error);
+        throw error;
+      }
+    }
+  } catch (error) {
+    console.error("Error in saveRecords:", error);
+    throw error;
+  }
 }
 
-module.exports = PaymentController;
+module.exports = {
+  getPayments: PaymentController.getPayments,
+  syncPayments: PaymentController.syncPayments,
+  getPaymentStats: PaymentController.getPaymentStats,
+  toggleVerified: PaymentController.toggleVerified,
+  processCSV: PaymentController.processCSV,
+  upload: upload,
+};

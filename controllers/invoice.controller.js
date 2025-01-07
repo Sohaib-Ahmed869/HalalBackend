@@ -1,5 +1,6 @@
 const axios = require("axios");
 const Invoice = require("../models/invoice.model");
+const Payment = require("../models/payment.model");
 
 class InvoiceController {
   static async getInvoices(req, res) {
@@ -750,6 +751,100 @@ class InvoiceController {
     } catch (error) {
       console.error("Error updating customer tags:", error);
       res.status(500).json({ error: "Failed to update customer tags" });
+    }
+  }
+
+  static async updatePOSPaymentMethods(req, res) {
+    try {
+      // Get POS invoices from 2024
+      const startDate = new Date("2024-01-01");
+      const endDate = new Date("2024-01-31T23:59:59.999Z");
+
+      const posInvoices = await Invoice.find({
+        $and: [
+          {
+            $or: [
+              { CardCode: "C9999" },
+              { paymentMethod: { $regex: /POS/i } },
+              { U_EPOSNo: { $ne: null } },
+              { isPOS: true },
+            ],
+          },
+          {
+            DocDate: {
+              $gte: startDate,
+              $lte: endDate,
+            },
+          },
+        ],
+      });
+
+      console.log(`Found ${posInvoices.length} POS invoices to process`);
+
+      const stats = {
+        total: posInvoices.length,
+        updated: 0,
+        skipped: 0,
+        errors: [],
+      };
+
+      // Process each POS invoice
+      for (const invoice of posInvoices) {
+        try {
+          // Find matching payment using DocNum
+          const payment = await Payment.findOne({ DocNum: invoice.DocNum });
+          console.log(`Processing invoice ${invoice.DocNum}`);
+          if (!payment) {
+            console.log(`No payment found for invoice ${invoice.DocNum}`);
+            stats.skipped++;
+            continue;
+          }
+
+          // Determine payment method based on non-zero payment field
+          let newPaymentMethod = "Unknown";
+          if (payment.CashSum > 0) {
+            newPaymentMethod = "POS-Cash";
+          } else if (payment.CheckSum > 0) {
+            newPaymentMethod = "POS-Cheque";
+          } else if (payment.CreditSum > 0) {
+            newPaymentMethod = "POS-Credit";
+          }
+
+          // Only update if payment method is different
+          if (invoice.paymentMethod !== newPaymentMethod) {
+            await Invoice.updateOne(
+              { _id: invoice._id },
+              { $set: { paymentMethod: newPaymentMethod } }
+            );
+            stats.updated++;
+            console.log(
+              `Updated invoice ${invoice.DocNum} to ${newPaymentMethod}`
+            );
+          } else {
+            stats.skipped++;
+          }
+        } catch (error) {
+          console.error(`Error processing invoice ${invoice.DocNum}:`, error);
+          stats.errors.push({
+            docNum: invoice.DocNum,
+            error: error.message,
+          });
+        }
+      }
+
+      res.json({
+        message: "POS invoice payment methods update completed",
+        stats: {
+          totalProcessed: stats.total,
+          updated: stats.updated,
+          skipped: stats.skipped,
+          errors: stats.errors.length,
+        },
+        errors: stats.errors.length > 0 ? stats.errors : undefined,
+      });
+    } catch (error) {
+      console.error("Error updating POS payment methods:", error);
+      res.status(500).json({ error: "Failed to update POS payment methods" });
     }
   }
 }
