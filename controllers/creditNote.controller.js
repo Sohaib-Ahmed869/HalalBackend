@@ -47,6 +47,33 @@ class CreditNoteController {
         .json({ error: "An error occurred while fetching credit notes." });
     }
   }
+
+  static async getCreditNoteByDocNum(req, res) {
+    try {
+      const { docNum } = req.params;
+
+      if (!docNum) {
+        return res.status(400).json({ error: "Document number is required" });
+      }
+
+      const creditNote = await CreditNote.findOne({ DocNum: docNum }).lean(); // For better performance
+
+      if (!creditNote) {
+        return res.status(404).json({ error: "Credit note not found" });
+      }
+
+      res.status(200).json({
+        success: true,
+        data: creditNote,
+      });
+    } catch (error) {
+      console.error("Error fetching credit note by DocNum:", error);
+      res.status(500).json({
+        error: "An error occurred while fetching the credit note.",
+        details: error.message,
+      });
+    }
+  }
 }
 
 module.exports = CreditNoteController;

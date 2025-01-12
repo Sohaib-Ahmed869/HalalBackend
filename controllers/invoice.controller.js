@@ -1,6 +1,7 @@
 const axios = require("axios");
 const Invoice = require("../models/invoice.model");
 const Payment = require("../models/payment.model");
+const PaymentLink = require("../models/paymentLinks.model");
 
 class InvoiceController {
   static async getInvoices(req, res) {
@@ -756,65 +757,87 @@ class InvoiceController {
 
   static async updatePOSPaymentMethods(req, res) {
     try {
-      // Get POS invoices from 2024
+      // Get all invoices from 2024
       const startDate = new Date("2024-01-01");
-      const endDate = new Date("2024-01-31T23:59:59.999Z");
+      const endDate = new Date("2024-12-31T23:59:59.999Z");
 
-      const posInvoices = await Invoice.find({
-        $and: [
-          {
-            $or: [
-              { CardCode: "C9999" },
-              { paymentMethod: { $regex: /POS/i } },
-              { U_EPOSNo: { $ne: null } },
-              { isPOS: true },
-            ],
-          },
-          {
-            DocDate: {
-              $gte: startDate,
-              $lte: endDate,
-            },
-          },
-        ],
+      const invoices = await Invoice.find({
+        DocDate: {
+          $gte: startDate,
+          $lte: endDate,
+        },
+        DocNum: {
+          $gte: 280758,
+        }
       });
 
-      console.log(`Found ${posInvoices.length} POS invoices to process`);
+      console.log(`Found ${invoices.length} invoices from 2024 to process`);
 
       const stats = {
-        total: posInvoices.length,
+        total: invoices.length,
         updated: 0,
         skipped: 0,
         errors: [],
       };
 
-      // Process each POS invoice
-      for (const invoice of posInvoices) {
+      // Process each invoice
+      for (const invoice of invoices) {
         try {
-          // Find matching payment using DocNum
-          const payment = await Payment.findOne({ DocNum: invoice.DocNum });
           console.log(`Processing invoice ${invoice.DocNum}`);
-          if (!payment) {
-            console.log(`No payment found for invoice ${invoice.DocNum}`);
+
+          // Find matching payment link using invoice DocNum
+          const paymentLink = await PaymentLink.findOne({
+            invoiceNumber: invoice.DocNum,
+          });
+
+          if (!paymentLink) {
+            console.log(`No payment link found for invoice ${invoice.DocNum}`);
             stats.skipped++;
             continue;
           }
 
-          // Determine payment method based on non-zero payment field
-          let newPaymentMethod = "Unknown";
-          if (payment.CashSum > 0) {
-            newPaymentMethod = "POS-Cash";
-          } else if (payment.CheckSum > 0) {
-            newPaymentMethod = "POS-Cheque";
-          } else if (payment.CreditSum > 0) {
-            newPaymentMethod = "POS-Credit";
+          // Find the actual payment using payment number from the link
+          const payment = await Payment.findOne({
+            DocNum: paymentLink.paymentNumber,
+          });
+
+          if (!payment) {
+            console.log(
+              `No payment found for payment number ${paymentLink.paymentNumber}`
+            );
+            stats.skipped++;
+            continue;
           }
 
-          // Only update if payment method is different
+          // Check if invoice meets POS criteria
+          const isPOS =
+            invoice.CardCode === "C9999" ||
+            invoice.CardName?.toLowerCase().includes("comptoir") ||
+            invoice.U_EPOSNo != null;
+
+          // Determine base payment method from payment fields
+          let paymentType = "Unknown";
+          if (payment.CashSum > 0) {
+            paymentType = "Cash";
+          } else if (payment.CheckSum > 0) {
+            paymentType = "Cheque";
+          } else if (payment.CreditSum > 0) {
+            paymentType = "Credit";
+          }
+
+          // Add POS prefix if it's a POS transaction
+          const newPaymentMethod = isPOS ? `POS-${paymentType}` : paymentType;
+
+          // Update only if payment method is different
           if (invoice.paymentMethod !== newPaymentMethod) {
             await Invoice.updateOne(
               { _id: invoice._id },
-              { $set: { paymentMethod: newPaymentMethod } }
+              {
+                $set: {
+                  paymentMethod: newPaymentMethod,
+                  isPOS, // Also update the isPOS field
+                },
+              }
             );
             stats.updated++;
             console.log(
@@ -822,6 +845,7 @@ class InvoiceController {
             );
           } else {
             stats.skipped++;
+            console.log(`No update needed for invoice ${invoice.DocNum}`);
           }
         } catch (error) {
           console.error(`Error processing invoice ${invoice.DocNum}:`, error);
@@ -833,7 +857,7 @@ class InvoiceController {
       }
 
       res.json({
-        message: "POS invoice payment methods update completed",
+        message: "Invoice payment methods update completed",
         stats: {
           totalProcessed: stats.total,
           updated: stats.updated,
@@ -843,8 +867,8 @@ class InvoiceController {
         errors: stats.errors.length > 0 ? stats.errors : undefined,
       });
     } catch (error) {
-      console.error("Error updating POS payment methods:", error);
-      res.status(500).json({ error: "Failed to update POS payment methods" });
+      console.error("Error updating payment methods:", error);
+      res.status(500).json({ error: "Failed to update payment methods" });
     }
   }
 }

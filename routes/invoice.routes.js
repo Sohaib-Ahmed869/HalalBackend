@@ -26,7 +26,7 @@ router.get("/dashboard-stats", InvoiceController.getDashboardStats);
 
 router.put("/customer", InvoiceController.updateCustomerTag);
 
-router.put(
+router.post(
   "/update-paymentMethods-POS",
   InvoiceController.updatePOSPaymentMethods
 );

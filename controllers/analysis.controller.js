@@ -4,6 +4,86 @@ const Analysis = require("../models/analysis.model");
 const BankStatement = require("../models/bankStatement.model");
 const Payment = require("../models/payment.model");
 const Sale = require("../models/sales.model");
+
+const mongoose = require("mongoose");
+
+const safeParseFloat = (value) => {
+  if (typeof value === "number") return value;
+  if (!value) return 0;
+  // Remove any non-numeric characters except decimal point and minus sign
+  const cleanValue = value.toString().replace(/[^\d.-]/g, "");
+  return parseFloat(cleanValue) || 0;
+};
+
+// Helper function to categorize bank statements
+function categorizeBankStatement(statement) {
+  const fields = [
+    statement.operationType,
+    statement.operationRef,
+    statement.comment,
+    statement.detail1,
+    statement.detail2,
+    statement.detail3,
+    statement.detail4,
+    statement.detail5,
+  ].map((field) => field?.toLowerCase() || "");
+
+  const combinedText = fields.join(" ");
+
+  if (combinedText.includes("remise de cheque")) return "cheque";
+  if (combinedText.includes("remise espece")) return "cash";
+  if (combinedText.includes("remise carte bancaire")) return "credit";
+  if (
+    combinedText.includes(
+      "cheque" ||
+        "remise de cheque" ||
+        "remise cheque" ||
+        "remise chèque" ||
+        "chèque" ||
+        "remise chèques" ||
+        "remise de chèques"
+    )
+  )
+    return "cheque";
+  if (
+    combinedText.includes("versement d'espece") ||
+    combinedText.includes("espece")
+  )
+    return "cash";
+
+  if (
+    combinedText.includes("virement") ||
+    combinedText.includes("virements") ||
+    (combinedText.includes("vir") && !combinedText.includes("paypal"))
+  )
+    return "transfer";
+  if (
+    combinedText.includes("credit") ||
+    combinedText.includes("REMISE CB") ||
+    combinedText.includes("REMISE CARTE") ||
+    combinedText.includes("REMISE CARTE BANCAIRE") ||
+    combinedText.includes("paypal")
+  )
+    return "credit";
+
+  return "transfer";
+}
+
+// Helper function to categorize sales transactions
+function categorizeExcelTransaction(transaction) {
+  const category = (transaction.category || "").toLowerCase();
+
+  if (category.includes("chèques") || category.includes("cheques"))
+    return "cheque";
+  if (category.includes("espèces") || category.includes("especes"))
+    return "cash";
+  if (category.includes("cb") || category.includes("carte")) return "credit";
+  if (category.includes("virement")) return "transfer";
+  if (category.includes("non payées")) return "Non Payées";
+
+  return "transfer";
+}
+
 class AnalysisController {
   static normalizeCompanyName(name) {
     if (!name) return "";
@@ -153,6 +233,7 @@ class AnalysisController {
     try {
       const { excelData, dateRange } = req.body;
       console.log("Received Excel Data:", excelData);
+      console.log("Date range:", dateRange);
 
       // Selected date range (for displaying discrepancies)
       const selectedStartDate = new Date(dateRange.start);
@@ -180,8 +261,8 @@ class AnalysisController {
       // Extended date range (for matching purposes)
       const extendedStartDate = new Date(selectedStartDate);
       const extendedEndDate = new Date(selectedEndDate);
-      extendedStartDate.setDate(extendedStartDate.getDate() - 50);
-      extendedEndDate.setDate(extendedEndDate.getDate() + 50);
+      extendedStartDate.setDate(extendedStartDate.getDate() - 20);
+      extendedEndDate.setDate(extendedEndDate.getDate() + 20);
 
       // Fetch invoices and payments from SAP
       const sapInvoices = await Invoice.find({
@@ -654,355 +735,215 @@ class AnalysisController {
     }
   }
 
+  // Update this part in your compareData function
   static async compareBankData(req, res) {
     try {
-      const { analysisId, dateRange } = req.body;
+      const { dateRange, analysisId } = req.body;
 
-      // 1) Load the analysis
-      const analysis = await Analysis.findById(analysisId);
-      if (!analysis) {
-        return res.status(404).json({ error: "Analysis not found" });
-      }
+      let endDate = new Date(dateRange.end);
+      //add 15 days to the end date
+      endDate.setDate(endDate.getDate() + 15);
 
-      // 2) Fetch ALL bank statements
-      const allBankStatements = await BankStatement.find({
+      // 1. Fetch bank statements within date range
+      const bankStatements = await BankStatement.find({
         amount: { $exists: true, $ne: null },
-        operationDate: { $exists: true, $ne: null },
+        operationDate: {
+          $gte: new Date(dateRange.start),
+          $lte: new Date(endDate),
+        },
         operationRef: { $exists: true, $ne: null, $ne: "" },
       }).sort({ operationDate: 1 });
 
-      // 3) If dateRange exists, define a filtered subset for display
-      const filteredBankStatements = dateRange
-        ? allBankStatements.filter((stmt) => {
-            const stmtDate = new Date(stmt.operationDate);
-            return (
-              stmtDate >= new Date(dateRange.start) &&
-              stmtDate <= new Date(dateRange.end)
-            );
-          })
-        : allBankStatements;
+      // 2. Fetch sales data within date range
+      const salesData = await Sale.find({
+        date: {
+          $gte: new Date(dateRange.start),
+          $lte: new Date(dateRange.end),
+        },
+      }).sort({ date: 1 });
 
-      // ----------------------------------------------------------------
-      // 4) We'll gather NEW auto-detected matches and discrepancies
-      //    (We will merge them with old matches later.)
-      // ----------------------------------------------------------------
-      const allBankMatches = [];
-      const allBankDiscrepancies = [];
-      const unmatchedBank = [...allBankStatements];
+      // 2.1 Fetch invoices data within date range
+      const invoicesData = await Invoice.find({
+        DocDate: {
+          $gte: new Date(dateRange.start),
+          $lte: new Date(dateRange.end),
+        },
+      }).sort({ DocDate: 1 });
 
-      // Helper to normalize text and compare
-      const normalizeAndCompare = (str1, str2) => {
-        if (!str1 || !str2) return 0;
-        str1 = AnalysisController.normalizeCompanyName(str1);
-        str2 = AnalysisController.normalizeCompanyName(str2);
-        return stringSimilarity.compareTwoStrings(str1, str2);
-      };
+      // 3. Process and categorize bank statements
+      const categorizedBankStatements = bankStatements.map((stmt) => ({
+        ...stmt.toObject(),
+        amount: safeParseFloat(stmt.amount), // Ensure amount is a number
+        category: categorizeBankStatement(stmt),
+      }));
 
-      // ----------------------------------------------------------------
-      // 5) Convert Mongoose Map of transactions (analysis.matches) to an object
-      //    so we can safely do `Object.entries(...)`.
-      // ----------------------------------------------------------------
-      let matchesObj = {};
-      if (analysis.matches && typeof analysis.matches.toObject === "function") {
-        // Mongoose Map => plain JS object
-        matchesObj = analysis.matches.toObject();
-      } else if (analysis.matches instanceof Map) {
-        // If it’s a native Map for some reason
-        matchesObj = Object.fromEntries(analysis.matches);
-      } else {
-        // Already a plain object or undefined
-        matchesObj = analysis.matches || {};
-      }
+      // 4. Process sales data into a flattened format
+      const processedSales = [];
 
-      // 6) Now do the matching logic over ALL bank statements
-      for (const bankStmt of allBankStatements) {
-        let bestMatch = null;
-        let bestScore = 0;
-        let matchSource = null;
-        let matchType = null;
+      salesData.forEach((sale) => {
+        // Process regular payment categories
+        const regularCategories = [
+          "Paiements Chèques",
+          "Paiements Espèces",
+          "Paiements CB Site",
+          "Paiements CB Téléphone",
+          "Virements",
+          "Livraisons non payées",
+        ];
 
-        // ------------------------------------------------------------
-        // (A) Check "Excel" transactions from `analysis.matches`
-        //     Remember: matchesObj => { categoryName: Transaction[] }
-        // ------------------------------------------------------------
-        for (const [category, transactions] of Array.from(
-          analysis.matches.entries()
-        )) {
-          for (const txn of transactions) {
-            if (txn.isResolved) continue;
-            // Compare amounts
-            const amountDiff = Math.abs(txn.excelAmount - bankStmt.amount);
-            if (amountDiff < 0.01) {
-              // Compare potential names
-              const nameScore = Math.max(
-                normalizeAndCompare(bankStmt.comment, txn.excelClient),
-                normalizeAndCompare(bankStmt.detail1, txn.excelClient),
-                normalizeAndCompare(bankStmt.detail2, txn.excelClient)
-              );
-              if (nameScore > bestScore) {
-                bestScore = nameScore;
-                bestMatch = txn;
-                matchSource = "excel";
-                matchType = nameScore > 0.6 ? "amount_and_name" : "amount_only";
-              } else if (!bestMatch) {
-                bestMatch = txn;
-                bestScore = 0;
-                matchSource = "excel";
-                matchType = "amount_only";
-              }
-            }
+        regularCategories.forEach((category) => {
+          if (Array.isArray(sale[category])) {
+            sale[category].forEach((entry) => {
+              const amount = safeParseFloat(entry.bank || entry.amount || 0);
+              processedSales.push({
+                date: sale.date,
+                client: entry.client,
+                amount,
+                category,
+                remarks: entry.remarks || "",
+                verified: entry.verified || false,
+                paymentCategory: categorizeExcelTransaction({ category }),
+              });
+            });
           }
-        }
+        });
 
-        // ------------------------------------------------------------
-        // (B) Check SAP discrepancies (`analysis.sapDiscrepancies`)
-        // ------------------------------------------------------------
-        if (
-          analysis.sapDiscrepancies &&
-          Array.isArray(analysis.sapDiscrepancies)
-        ) {
-          for (const sapTxn of analysis.sapDiscrepancies) {
-            const amountDiff = Math.abs(sapTxn.DocTotal - bankStmt.amount);
-            if (amountDiff < 0.01) {
-              const nameScore = Math.max(
-                normalizeAndCompare(bankStmt.comment, sapTxn.CardName),
-                normalizeAndCompare(bankStmt.detail1, sapTxn.CardName),
-                normalizeAndCompare(bankStmt.detail2, sapTxn.CardName),
-                normalizeAndCompare(bankStmt.operationRef, sapTxn.DocNum),
-                normalizeAndCompare(bankStmt.operationRef, sapTxn.U_EPOSNo)
-              );
-              if (nameScore > bestScore) {
-                bestScore = nameScore;
-                bestMatch = sapTxn;
-                matchSource = "sap";
-                matchType = nameScore > 0.6 ? "amount_and_name" : "amount_only";
-              } else if (!bestMatch) {
-                bestMatch = sapTxn;
-                bestScore = 0;
-                matchSource = "sap";
-                matchType = "amount_only";
-              }
-            }
-          }
-        }
-
-        // ------------------------------------------------------------
-        // (C) If we found something that matches better than 0
-        //     => create a new BankMatch object
-        // ------------------------------------------------------------
-        if (bestMatch) {
-          const match = {
-            bankStatement: bankStmt,
-            matchedTransaction: bestMatch,
-            matchSource,
-            matchType,
-            confidence:
-              bestScore > 0.8 ? "high" : bestScore > 0.6 ? "medium" : "low",
-            status: "pending",
-            amount: bankStmt.amount,
-            date: bankStmt.operationDate,
+        // Process POS categories
+        if (sale.POS) {
+          const posCategories = {
+            "Caisse CB": "credit",
+            "Caisse Espèces": "cash",
+            "Caisse chèques": "cheque",
           };
-          allBankMatches.push(match);
 
-          // Remove from unmatched if desired
-          const idx = unmatchedBank.findIndex(
-            (b) => b._id.toString() === bankStmt._id.toString()
-          );
-          if (idx !== -1) unmatchedBank.splice(idx, 1);
-        } else {
-          // No match => discrepancy
-          allBankDiscrepancies.push({
-            bankStatement: bankStmt,
-            status: "unresolved",
-            amount: bankStmt.amount,
-            date: bankStmt.operationDate,
+          Object.entries(sale.POS).forEach(([category, entries]) => {
+            if (Array.isArray(entries)) {
+              entries.forEach((entry) => {
+                if (entry.client && entry.client.toLowerCase() === "total")
+                  return;
+
+                const amount = safeParseFloat(entry.amount || 0);
+                processedSales.push({
+                  date: sale.date,
+                  client: entry.client,
+                  amount,
+                  category: `POS ${category}`,
+                  verified: entry.verified || false,
+                  paymentCategory: posCategories[category] || "transfer",
+                });
+              });
+            }
           });
         }
-      }
+      });
 
-      // ----------------------------------------------------------------
-      // 7) Build “filtered” sets if dateRange is specified
-      // ----------------------------------------------------------------
-      const filteredBankMatches = [];
-      const filteredBankDiscrepancies = [];
-      if (dateRange) {
-        const startDate = new Date(dateRange.start);
-        const endDate = new Date(dateRange.end);
-
-        for (const m of allBankMatches) {
-          const matchDate = new Date(m.bankStatement.operationDate);
-          if (matchDate >= startDate && matchDate <= endDate) {
-            filteredBankMatches.push(m);
-          }
+      // 5. Calculate totals for bank statements
+      const bankTotals = categorizedBankStatements.reduce(
+        (totals, stmt) => {
+          const amount = safeParseFloat(stmt.amount);
+          totals.totalAmount = safeParseFloat(totals.totalAmount) + amount;
+          totals[stmt.category] =
+            safeParseFloat(totals[stmt.category]) + amount;
+          return totals;
+        },
+        {
+          totalAmount: 0,
+          transfer: 0,
+          credit: 0,
+          cash: 0,
+          cheque: 0,
         }
-        for (const d of allBankDiscrepancies) {
-          const discrepancyDate = new Date(d.bankStatement.operationDate);
-          if (discrepancyDate >= startDate && discrepancyDate <= endDate) {
-            filteredBankDiscrepancies.push(d);
-          }
-        }
-      } else {
-        // If no date range, "filtered" just equals "all"
-        filteredBankMatches.push(...allBankMatches);
-        filteredBankDiscrepancies.push(...allBankDiscrepancies);
-      }
-
-      // ----------------------------------------------------------------
-      // 8) Summaries for the filtered sets
-      // ----------------------------------------------------------------
-      const filteredSummary = {
-        totalTransactions: filteredBankStatements.length,
-        matchedCount: filteredBankMatches.length,
-        unmatchedCount: filteredBankDiscrepancies.length,
-        totalAmount: filteredBankStatements.reduce(
-          (sum, stmt) => sum + stmt.amount,
-          0
-        ),
-        matchedAmount: filteredBankMatches.reduce(
-          (sum, match) => sum + match.amount,
-          0
-        ),
-      };
-
-      // 9) Summaries for ALL data
-      const allDataSummary = {
-        totalTransactions: allBankStatements.length,
-        matchedCount: allBankMatches.length,
-        unmatchedCount: allBankDiscrepancies.length,
-        totalAmount: allBankStatements.reduce(
-          (sum, stmt) => sum + stmt.amount,
-          0
-        ),
-        matchedAmount: allBankMatches.reduce(
-          (sum, match) => sum + match.amount,
-          0
-        ),
-      };
-
-      // ----------------------------------------------------------------
-      // 10) Merge newly found matches with old matches already stored
-      //     in analysis.bankReconciliation
-      // ----------------------------------------------------------------
-
-      // (A) Load old matches
-      let oldMatches = [];
-      if (
-        analysis.bankReconciliation &&
-        Array.isArray(analysis.bankReconciliation.matches)
-      ) {
-        oldMatches = analysis.bankReconciliation.matches;
-      }
-
-      // (B) Make a set of old matched bankStatement IDs
-      const oldMatchedIds = new Set(
-        oldMatches.map((m) => m.bankStatement?._id?.toString())
       );
 
-      // (C) Filter new matches so we don't double-match the same statement
-      const newUniqueMatches = [];
-      for (const nm of allBankMatches) {
-        const bankId = nm.bankStatement?._id?.toString();
-        if (!oldMatchedIds.has(bankId)) {
-          newUniqueMatches.push(nm);
+      // 6. Calculate totals for sales data
+      const salesTotals = processedSales.reduce(
+        (totals, tx) => {
+          const amount = safeParseFloat(tx.amount);
+          totals.totalAmount = safeParseFloat(totals.totalAmount) + amount;
+          totals[tx.paymentCategory] =
+            safeParseFloat(totals[tx.paymentCategory]) + amount;
+          return totals;
+        },
+        {
+          totalAmount: 0,
+          transfer: 0,
+          credit: 0,
+          cash: 0,
+          cheque: 0,
+          "Non Payées": 0,
         }
-      }
-
-      // (D) Final merged array
-      const mergedAllMatches = [...oldMatches, ...newUniqueMatches];
-
-      // (E) Rebuild allDiscrepancies to exclude matched ones
-      const matchedBankIds = new Set(
-        mergedAllMatches.map((m) => m.bankStatement._id.toString())
       );
-      const finalAllDiscrepancies = allBankStatements
-        .filter((stmt) => !matchedBankIds.has(stmt._id.toString()))
-        .map((stmt) => ({
-          bankStatement: stmt,
-          status: "unresolved",
-          amount: stmt.amount,
-          date: stmt.operationDate,
-        }));
 
-      // (F) Rebuild filtered sets from the mergedAllMatches, finalAllDiscrepancies
-      const mergedFilteredMatches = [];
-      const mergedFilteredDiscrepancies = [];
+      const excelTotal = salesTotals.totalAmount;
 
-      if (dateRange) {
-        const startDate = new Date(dateRange.start);
-        const endDate = new Date(dateRange.end);
-
-        // Filter mergedAllMatches
-        for (const m of mergedAllMatches) {
-          const d = new Date(m.bankStatement.operationDate);
-          if (d >= startDate && d <= endDate) {
-            mergedFilteredMatches.push(m);
-          }
+      if (analysisId) {
+        const analysis = await Analysis.findById(analysisId);
+        if (analysis) {
+          analysis.bankReconciliation = {
+            excelTotal,
+            reconciled: false,
+            lastUpdated: new Date(),
+          };
+          await analysis.save();
         }
-        // Filter finalAllDiscrepancies
-        for (const dd of finalAllDiscrepancies) {
-          const dateD = new Date(dd.bankStatement.operationDate);
-          if (dateD >= startDate && dateD <= endDate) {
-            mergedFilteredDiscrepancies.push(dd);
-          }
-        }
-      } else {
-        // No dateRange => all
-        mergedFilteredMatches.push(...mergedAllMatches);
-        mergedFilteredDiscrepancies.push(...finalAllDiscrepancies);
       }
 
-      // (G) Build updated summary for merged filtered sets
-      const mergedFilteredSummary = {
-        totalTransactions: filteredBankStatements.length,
-        matchedCount: mergedFilteredMatches.length,
-        unmatchedCount: mergedFilteredDiscrepancies.length,
-        totalAmount: filteredBankStatements.reduce(
-          (sum, stmt) => sum + stmt.amount,
-          0
-        ),
-        matchedAmount: mergedFilteredMatches.reduce(
-          (sum, match) => sum + match.amount,
-          0
-        ),
-      };
-
-      // ----------------------------------------------------------------
-      // 11) Finally, save everything back into analysis.bankReconciliation
-      // ----------------------------------------------------------------
-      analysis.bankReconciliation = {
-        matches: mergedAllMatches,
-        discrepancies: finalAllDiscrepancies,
-        summary: mergedFilteredSummary,
-        lastUpdated: new Date(),
-        allDataSummary, // optional
-        filteredMatches: mergedFilteredMatches, // optional
-        filteredDiscrepancies: mergedFilteredDiscrepancies, // optional
-      };
-
-      await analysis.save();
-
-      // ----------------------------------------------------------------
-      // 12) Respond with the arrays your frontend needs
-      // ----------------------------------------------------------------
-      return res.json({
-        // Merged final arrays (for entire DB range)
-        allMatches: mergedAllMatches,
-        allDiscrepancies: finalAllDiscrepancies,
-        // Merged filtered arrays (for date range, if any)
-        filteredMatches: mergedFilteredMatches,
-        filteredDiscrepancies: mergedFilteredDiscrepancies,
-        // Summaries
-        summary: mergedFilteredSummary,
-        allDataSummary,
+      // 7. Return processed data with correctly formatted numbers
+      res.json({
+        categorizedData: {
+          bankStatements: categorizedBankStatements,
+          excelTransactions: processedSales,
+          totals: {
+            bank: bankTotals,
+            excel: salesTotals,
+          },
+        },
       });
     } catch (error) {
-      console.error("Bank reconciliation error:", error);
-      return res.status(500).json({
-        error: "Bank reconciliation failed: " + error.message,
-      });
+      console.error("Error comparing bank data:", error);
+      res.status(500).json({ error: error.message });
     }
   }
 
+  static async reconcileBank(req, res) {
+    try {
+      const { analysisId, categoryReconciled } = req.body;
+      console.log(
+        "Reconciling bank for analysis:",
+        analysisId,
+        categoryReconciled
+      );
+
+      //get the analysis
+      const analysis = await Analysis.findById(analysisId);
+
+      //if category is cash then cashRecociled is true
+      if (categoryReconciled === "cash") {
+        analysis.cashReconciled = true;
+      }
+      //if category is cheque then chequeRecociled is true
+      if (categoryReconciled === "cheque") {
+        analysis.chequeReconciled = true;
+      }
+
+      //if category is credit then creditRecociled is true
+      if (categoryReconciled === "credit") {
+        analysis.creditReconciled = true;
+      }
+
+      //if category is transfer then transferRecociled is true
+      if (categoryReconciled === "transfer") {
+        analysis.transferReconciled = true;
+      }
+
+      analysis.save();
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error reconciling bank:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  }
   static async resolveBankDiscrepancy(req, res) {
     try {
       const { analysisId, bankStatementId, resolution, matchedTransactions } =

@@ -286,6 +286,28 @@ const BankReconciliationSchema = new mongoose.Schema({
   },
 });
 
+const SimplifiedBankReconciliationSchema = new mongoose.Schema(
+  {
+    excelTotal: {
+      type: Number,
+      required: true,
+      default: 0,
+    },
+    reconciled: {
+      type: Boolean,
+    },
+    matchedWith: {
+      type: mongoose.Schema.Types.Mixed, // Changed from String to Mixed
+      default: null,
+    },
+    lastUpdated: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
 const AnalysisSchema = new mongoose.Schema({
   dateRange: {
     start: {
@@ -342,21 +364,23 @@ const AnalysisSchema = new mongoose.Schema({
   },
   // Add bank reconciliation
   bankReconciliation: {
-    type: BankReconciliationSchema,
-    default: function () {
-      return {
-        matches: [],
-        discrepancies: [],
-        summary: {
-          totalTransactions: 0,
-          matchedCount: 0,
-          unmatchedCount: 0,
-          totalAmount: 0,
-          matchedAmount: 0,
-        },
-        lastUpdated: new Date(),
-      };
-    },
+    type: SimplifiedBankReconciliationSchema,
+  },
+  cashReconciled: {
+    type: Boolean,
+    default: false,
+  },
+  chequeReconciled: {
+    type: Boolean,
+    default: false,
+  },
+  bankReconciled: {
+    type: Boolean,
+    default: false,
+  },
+  transferReconciled: {
+    type: Boolean,
+    default: false,
   },
 });
 

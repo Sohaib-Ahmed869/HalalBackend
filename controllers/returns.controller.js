@@ -42,9 +42,9 @@ class ReturnsController {
       });
     } catch (error) {
       console.error("Error fetching returns:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: "An error occurred while fetching returns.",
-        details: error.message 
+        details: error.message,
       });
     }
   }
@@ -82,9 +82,9 @@ class ReturnsController {
       });
     } catch (error) {
       console.error("Error fetching returns by customer:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: "An error occurred while fetching returns by customer.",
-        details: error.message 
+        details: error.message,
       });
     }
   }
@@ -110,9 +110,36 @@ class ReturnsController {
       res.status(200).json(returnDoc);
     } catch (error) {
       console.error("Error fetching return document:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: "An error occurred while fetching the return document.",
-        details: error.message 
+        details: error.message,
+      });
+    }
+  }
+
+  static async getReturnByDocNum(req, res) {
+    try {
+      const { docNum } = req.params;
+
+      if (!docNum) {
+        return res.status(400).json({ error: "Document number is required" });
+      }
+
+      const returnDoc = await Return.findOne({ DocNum: docNum }).lean(); // For better performance
+
+      if (!returnDoc) {
+        return res.status(404).json({ error: "Return document not found" });
+      }
+
+      res.status(200).json({
+        success: true,
+        data: returnDoc,
+      });
+    } catch (error) {
+      console.error("Error fetching return by DocNum:", error);
+      res.status(500).json({
+        error: "An error occurred while fetching the return document.",
+        details: error.message,
       });
     }
   }

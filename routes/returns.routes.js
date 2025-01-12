@@ -4,6 +4,7 @@ const ReturnsController = require("../controllers/returns.controller");
 
 router.get("/", ReturnsController.getReturnsByDate);
 router.get("/customer/:cardCode", ReturnsController.getReturnsByCustomer);
-router.get("/:docEntry", ReturnsController.getReturnByDocEntry);
+router.get("/docnum/:docNum", ReturnsController.getReturnByDocNum);
+
 
 module.exports = router;
