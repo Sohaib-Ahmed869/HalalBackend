@@ -378,6 +378,10 @@ const AnalysisSchema = new mongoose.Schema({
     excelPOSDetails: [POSDetailsSchema],
     dailyComparisons: [POSDailyComparisonSchema],
     sapPOSByPaymentMethod: [POSDetailsSchemaPayments],
+    payments: {
+      type: Array,
+      default: [],
+    },
   },
   // Add bank reconciliation
   bankReconciliation: {
@@ -401,6 +405,9 @@ const AnalysisSchema = new mongoose.Schema({
     default: false,
   },
   closed_off: {
+    type: String,
+  },
+  pos_closed_off: {
     type: String,
   },
   bankTransferDifference: {

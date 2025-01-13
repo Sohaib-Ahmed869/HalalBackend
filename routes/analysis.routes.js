@@ -22,5 +22,6 @@ router.post(
 );
 router.post("/reconcile-bank", AnalysisController.reconcileBank);
 router.post("/closeOff", AnalysisController.closeOffWithANote);
+router.post("/pos-closeOff", AnalysisController.POScloseOffWithANote);
 
 module.exports = router;

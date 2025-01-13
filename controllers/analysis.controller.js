@@ -257,6 +257,7 @@ class AnalysisController {
           sapDiscrepancies: existingAnalysis.sapDiscrepancies,
           extendedSapDiscrepancies: existingAnalysis.extendedSapDiscrepancies,
           posAnalysis: existingAnalysis.posAnalysis,
+          pos_closed_off: existingAnalysis.pos_closed_off,
         });
       }
       // Extended date range (for matching purposes)
@@ -505,7 +506,7 @@ class AnalysisController {
         Virements: 0,
       };
 
-      const payments = await Payment.find({
+      let payments = await Payment.find({
         DocNum: { $in: paymentDocNums },
       });
 
@@ -623,6 +624,7 @@ class AnalysisController {
           excelPOSDetails,
           dailyComparisons: posDateComparisons,
           sapPOSByPaymentMethod: paymentsByMethod,
+          payments: payments,
         },
         // Add default bank reconciliation data
         bankReconciliation: {
@@ -2090,6 +2092,25 @@ class AnalysisController {
       }
 
       analysis.closed_off = note;
+      await analysis.save();
+
+      res.json({ success: true, notes: analysis.notes });
+    } catch (error) {
+      console.error("Error adding a note:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async POScloseOffWithANote(req, res) {
+    try {
+      const { analysisId, note } = req.body;
+
+      const analysis = await Analysis.findById(analysisId);
+      if (!analysis) {
+        return res.status(404).json({ error: "Analysis not found" });
+      }
+
+      analysis.pos_closed_off = note;
       await analysis.save();
 
       res.json({ success: true, notes: analysis.notes });
