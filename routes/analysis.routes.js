@@ -21,5 +21,6 @@ router.post(
   AnalysisController.findPotentialExcelMatchesForSAP
 );
 router.post("/reconcile-bank", AnalysisController.reconcileBank);
+router.post("/closeOff", AnalysisController.closeOffWithANote);
 
 module.exports = router;

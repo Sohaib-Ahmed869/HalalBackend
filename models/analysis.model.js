@@ -129,6 +129,21 @@ const POSDetailsSchema = new mongoose.Schema({
   },
 });
 
+const POSDetailsSchemaPayments = new mongoose.Schema({
+  CB: {
+    type: Number,
+  },
+  Espèces: {
+    type: Number,
+  },
+  Chèque: {
+    type: Number,
+  },
+  Virements: {
+    type: Number,
+  },
+});
+
 const SAPInvoiceSchema = new mongoose.Schema({
   DocDate: {
     type: Date,
@@ -143,6 +158,7 @@ const SAPInvoiceSchema = new mongoose.Schema({
   U_EPOSNo: String,
   DocNum: String,
   paymentMethod: String,
+  paymentDate: Date,
   _id: mongoose.Schema.Types.ObjectId,
   source: {
     type: String,
@@ -361,11 +377,13 @@ const AnalysisSchema = new mongoose.Schema({
     sapPOSDetails: [SAPInvoiceSchema],
     excelPOSDetails: [POSDetailsSchema],
     dailyComparisons: [POSDailyComparisonSchema],
+    sapPOSByPaymentMethod: [POSDetailsSchemaPayments],
   },
   // Add bank reconciliation
   bankReconciliation: {
     type: SimplifiedBankReconciliationSchema,
   },
+
   cashReconciled: {
     type: Boolean,
     default: false,
@@ -381,6 +399,21 @@ const AnalysisSchema = new mongoose.Schema({
   transferReconciled: {
     type: Boolean,
     default: false,
+  },
+  closed_off: {
+    type: String,
+  },
+  bankTransferDifference: {
+    type: Number,
+  },
+  bankChequeDifference: {
+    type: Number,
+  },
+  bankCashDifference: {
+    type: Number,
+  },
+  bankBankDifference: {
+    type: Number,
   },
 });
 

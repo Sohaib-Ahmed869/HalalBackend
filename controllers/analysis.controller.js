@@ -3,6 +3,7 @@ const Invoice = require("../models/invoice.model");
 const Analysis = require("../models/analysis.model");
 const BankStatement = require("../models/bankStatement.model");
 const Payment = require("../models/payment.model");
+const PaymentLink = require("../models/paymentLinks.model");
 const Sale = require("../models/sales.model");
 
 const mongoose = require("mongoose");
@@ -409,17 +410,46 @@ class AnalysisController {
       }
 
       // Process POS data separately
-      const sapPOSSales = selectedRangeSapData.filter(
-        (invoice) =>
-          invoice.CardCode === "C9999" ||
-          invoice.paymentMethod?.toLowerCase().includes("POS") ||
-          invoice.U_EPOSNo != null ||
-          invoice.isPOS
+      const sapPOSSales = await Promise.all(
+        selectedRangeSapData
+          .filter(
+            (invoice) =>
+              invoice.CardCode === "C9999" ||
+              invoice.paymentMethod?.toLowerCase().includes("POS") ||
+              invoice.U_EPOSNo != null ||
+              invoice.isPOS
+          )
+          .map(async (invoice) => {
+            // Find corresponding payment link
+            const paymentLink = await PaymentLink.findOne({
+              invoiceNumber: invoice.DocNum,
+            });
+
+            if (paymentLink) {
+              // Add one day to payment date
+              const adjustedPaymentDate = new Date(paymentLink.paymentDate);
+              adjustedPaymentDate.setDate(adjustedPaymentDate.getDate() + 1);
+
+              return {
+                ...invoice,
+                paymentDate: paymentLink.paymentDate,
+
+                sameDay:
+                  adjustedPaymentDate.setHours(0, 0, 0, 0) ===
+                  new Date(invoice.DocDate).setHours(0, 0, 0, 0),
+              };
+            }
+
+            return {
+              ...invoice,
+              paymentDate: null,
+              sameDay: false,
+            };
+          })
       );
 
-      // Calculate POS totals from Excel data
       const sapPOSTotal = sapPOSSales.reduce(
-        (sum, invoice) => sum + invoice.DocTotal,
+        (sum, invoice) => sum + (invoice.sameDay ? invoice.DocTotal : 0),
         0
       );
       const excelPOSDetails = AnalysisController.extractPOSDetails(excelData);
@@ -427,6 +457,74 @@ class AnalysisController {
         (sum, entry) => sum + entry.amount,
         0
       );
+
+      //find the payments by method from invoices , first create a list of all payment DocNums by finding it from the payment links
+      const paymentDocNums = [];
+      await Promise.all(
+        selectedRangeSapData.map(async (invoice) => {
+          try {
+            //check in the payment links - using find() instead of findOne()
+            const paymentLinks = await PaymentLink.find({
+              invoiceNumber: invoice.DocNum,
+            });
+
+            if (paymentLinks && paymentLinks.length > 0) {
+              //check if invoice is not a POS invoice
+              if (invoice.U_EPOSNo) {
+                //process each payment link
+                paymentLinks.forEach((paymentLink) => {
+                  //check that invoice date is the same as payment date after adding one day to the payment date
+                  const adjustedPaymentDate = new Date(paymentLink.paymentDate);
+                  adjustedPaymentDate.setDate(
+                    adjustedPaymentDate.getDate() + 1
+                  );
+
+                  if (
+                    new Date(invoice.DocDate).setHours(0, 0, 0, 0) ===
+                    adjustedPaymentDate.setHours(0, 0, 0, 0)
+                  ) {
+                    paymentDocNums.push(paymentLink.paymentNumber);
+                  }
+                });
+              }
+            }
+          } catch (error) {
+            console.error(
+              `Error processing payment links for invoice ${invoice.DocNum}:`,
+              error
+            );
+          }
+        })
+      );
+
+      //find the payments by method from the payments
+      let paymentsByMethod = {
+        CB: 0,
+        Espèces: 0,
+        Chèque: 0,
+        Virements: 0,
+      };
+
+      const payments = await Payment.find({
+        DocNum: { $in: paymentDocNums },
+      });
+
+      console.log(payments.length);
+
+      payments.forEach((payment) => {
+        if (payment.CashSum > 0) {
+          paymentsByMethod["Espèces"] += payment.CashSum;
+        }
+        if (payment.CheckSum > 0) {
+          paymentsByMethod["Chèque"] += payment.CheckSum;
+        }
+        if (payment.TransferSum > 0) {
+          paymentsByMethod["Virements"] += payment.TransferSum;
+        }
+        if (payment.CreditSum > 0) {
+          paymentsByMethod["CB"] += payment.CreditSum;
+        }
+      });
 
       // Calculate daily POS totals comparison
       const dailyComparisons = {};
@@ -524,6 +622,7 @@ class AnalysisController {
           sapPOSDetails: sapPOSSales,
           excelPOSDetails,
           dailyComparisons: posDateComparisons,
+          sapPOSByPaymentMethod: paymentsByMethod,
         },
         // Add default bank reconciliation data
         bankReconciliation: {
@@ -561,6 +660,7 @@ class AnalysisController {
         analysisId: analysis._id,
         matches: groupedMatches,
         excelDiscrepancies: groupedExcelDiscrepancies,
+
         sapDiscrepancies: sapDiscrepancies.filter(
           (invoice) =>
             !(
@@ -907,38 +1007,41 @@ class AnalysisController {
 
   static async reconcileBank(req, res) {
     try {
-      const { analysisId, categoryReconciled } = req.body;
+      const { analysisId, categoryReconciled, difference, differenceField } =
+        req.body;
       console.log(
         "Reconciling bank for analysis:",
         analysisId,
-        categoryReconciled
+        categoryReconciled,
+        difference,
+        differenceField
       );
 
-      //get the analysis
+      // Get the analysis
       const analysis = await Analysis.findById(analysisId);
 
-      //if category is cash then cashRecociled is true
+      // Update reconciliation status based on category
       if (categoryReconciled === "cash") {
         analysis.cashReconciled = true;
-      }
-      //if category is cheque then chequeRecociled is true
-      if (categoryReconciled === "cheque") {
+        analysis.bankCashDifference = difference;
+      } else if (categoryReconciled === "cheque") {
         analysis.chequeReconciled = true;
-      }
-
-      //if category is credit then creditRecociled is true
-      if (categoryReconciled === "credit") {
-        analysis.creditReconciled = true;
-      }
-
-      //if category is transfer then transferRecociled is true
-      if (categoryReconciled === "transfer") {
+        analysis.bankChequeDifference = difference;
+      } else if (categoryReconciled === "credit") {
+        analysis.bankReconciled = true;
+        analysis.bankBankDifference = difference;
+      } else if (categoryReconciled === "transfer") {
         analysis.transferReconciled = true;
+        analysis.bankTransferDifference = difference;
       }
 
-      analysis.save();
+      await analysis.save();
 
-      res.json({ success: true });
+      res.json({
+        success: true,
+        difference,
+        category: categoryReconciled,
+      });
     } catch (error) {
       console.error("Error reconciling bank:", error.message);
       res.status(500).json({ error: error.message });
@@ -1973,6 +2076,25 @@ class AnalysisController {
       res.json({ potentialMatches });
     } catch (error) {
       console.error("Error finding potential matches:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async closeOffWithANote(req, res) {
+    try {
+      const { analysisId, note } = req.body;
+
+      const analysis = await Analysis.findById(analysisId);
+      if (!analysis) {
+        return res.status(404).json({ error: "Analysis not found" });
+      }
+
+      analysis.closed_off = note;
+      await analysis.save();
+
+      res.json({ success: true, notes: analysis.notes });
+    } catch (error) {
+      console.error("Error adding a note:", error);
       res.status(500).json({ error: error.message });
     }
   }
