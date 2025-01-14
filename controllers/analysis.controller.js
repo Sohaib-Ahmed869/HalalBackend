@@ -239,17 +239,62 @@ class AnalysisController {
       // Selected date range (for displaying discrepancies)
       const selectedStartDate = new Date(dateRange.start);
       const selectedEndDate = new Date(dateRange.end);
-      selectedStartDate.setHours(0, 0, 0, 0);
-      selectedEndDate.setHours(23, 59, 59, 999);
+      const extendedStartDate = new Date(selectedStartDate);
+      const extendedEndDate = new Date(selectedEndDate);
+      selectedStartDate.setHours(12, 0, 0, 0);
+      selectedEndDate.setHours(12, 0, 0, 0);
+
+      const SSD = new Date(dateRange.start);
+      //set hours to 0,0,0,0
+      SSD.setHours(0, 0, 0, 0);
+
+      const EED = new Date(dateRange.end);
+      //set hours to 23,59,59,999
+      EED.setHours(23, 59, 59, 999);
 
       // Check if analysis already exists for this date range
+      // Convert dates to YYYY-MM-DD format
+      const getDateOnly = (date) => {
+        return date.toISOString().split("T")[0];
+      };
+
+      const startDateStr = getDateOnly(selectedStartDate);
+      const endDateStr = getDateOnly(selectedEndDate);
+
+      console.log(startDateStr, endDateStr);
+
+      // Find analysis where dates match (ignoring time)
       const existingAnalysis = await Analysis.findOne({
-        "dateRange.start": selectedStartDate,
-        "dateRange.end": selectedEndDate,
+        $and: [
+          {
+            $expr: {
+              $eq: [
+                {
+                  $dateToString: {
+                    format: "%Y-%m-%d",
+                    date: "$dateRange.start",
+                  },
+                },
+                startDateStr,
+              ],
+            },
+          },
+          {
+            $expr: {
+              $eq: [
+                {
+                  $dateToString: { format: "%Y-%m-%d", date: "$dateRange.end" },
+                },
+                endDateStr,
+              ],
+            },
+          },
+        ],
       });
 
       if (existingAnalysis) {
         // console.log(existingAnalysis.extendedSapDiscrepancies);
+        console.log("existing analysis found");
         return res.json({
           analysisId: existingAnalysis._id,
           matches: existingAnalysis.matches,
@@ -260,9 +305,11 @@ class AnalysisController {
           pos_closed_off: existingAnalysis.pos_closed_off,
         });
       }
+
+      console.log("no existing analysis found");
+
       // Extended date range (for matching purposes)
-      const extendedStartDate = new Date(selectedStartDate);
-      const extendedEndDate = new Date(selectedEndDate);
+
       extendedStartDate.setDate(extendedStartDate.getDate() - 20);
       extendedEndDate.setDate(extendedEndDate.getDate() + 20);
 
@@ -270,6 +317,8 @@ class AnalysisController {
       const sapInvoices = await Invoice.find({
         DocDate: { $gte: extendedStartDate, $lte: extendedEndDate },
       }).lean();
+
+      console.log("Retrieved SAP Data:", sapInvoices.length, "invoices");
       const sapPayments = [];
 
       const flattenedPayments = sapPayments.map(
@@ -282,10 +331,14 @@ class AnalysisController {
       // Filter SAP data for selected date range
       const selectedRangeSapData = allSapData.filter((invoice) => {
         const invoiceDate = new Date(invoice.DocDate);
-        return (
-          invoiceDate >= selectedStartDate && invoiceDate <= selectedEndDate
-        );
+        return invoiceDate >= SSD && invoiceDate <= EED;
       });
+
+      console.log(
+        "Retrieved SAP Data 22:",
+        selectedRangeSapData.length,
+        "invoices"
+      );
 
       console.log("Retrieved SAP Data:", allSapData.length, "invoices");
 
@@ -449,6 +502,8 @@ class AnalysisController {
           })
       );
 
+      console.log("Retrieved POS Data:", sapPOSSales.length, "invoices");
+
       const sapPOSTotal = sapPOSSales.reduce(
         (sum, invoice) => sum + (invoice.sameDay ? invoice.DocTotal : 0),
         0
@@ -470,6 +525,7 @@ class AnalysisController {
             });
 
             if (paymentLinks && paymentLinks.length > 0) {
+              console.log(paymentLinks.length);
               //check if invoice is not a POS invoice
               if (invoice.U_EPOSNo) {
                 //process each payment link
@@ -484,6 +540,7 @@ class AnalysisController {
                     new Date(invoice.DocDate).setHours(0, 0, 0, 0) ===
                     adjustedPaymentDate.setHours(0, 0, 0, 0)
                   ) {
+                    console.log(paymentLink.paymentNumber);
                     paymentDocNums.push(paymentLink.paymentNumber);
                   }
                 });
@@ -1811,6 +1868,52 @@ class AnalysisController {
 
       if (discrepancyIndex === -1) {
         return res.status(404).json({ error: "SAP discrepancy not found" });
+      }
+
+      //IN CASE THE MATCHEDTRANSACTION IS EMPTY, STILL RESOLVE THE DISCREPANCY in analysis.matches.sapResolvedMatches
+      if (matchedTransactions.length === 0) {
+        // Create new matches
+        const originalDiscrepancy = analysis.sapDiscrepancies[discrepancyIndex];
+        const newMatches = [
+          {
+            excelClient: "N/A",
+            sapCustomer: originalDiscrepancy.CardName,
+            excelAmount: 0,
+            sapAmount: analysis.sapDiscrepancies[discrepancyIndex].DocTotal,
+            docNum: analysis.sapDiscrepancies[discrepancyIndex].DocNum,
+            docDate: analysis.sapDiscrepancies[discrepancyIndex].DocDate,
+            category: "SAP Invoice",
+            remarks: resolution || "",
+            isResolved: true,
+            resolution,
+            type: "sap_to_excel",
+          },
+        ];
+
+        // Update matches Map
+        let matchesMap = analysis.matches;
+        if (!(matchesMap instanceof Map)) {
+          matchesMap = new Map(Object.entries(analysis.matches));
+        }
+
+        const resolvedCategory = "SAP Resolved Matches";
+        const resolvedMatches = matchesMap.get(resolvedCategory) || [];
+        resolvedMatches.push(...newMatches);
+        matchesMap.set(resolvedCategory, resolvedMatches);
+
+        // Update analysis document
+        analysis.matches = matchesMap;
+
+        analysis.markModified("matches");
+
+        await analysis.save();
+
+        res.json({
+          success: true,
+          matches: Array.from(matchesMap.get(resolvedCategory) || []),
+          sapDiscrepancies: analysis.sapDiscrepancies,
+        });
+        return;
       }
 
       // Get the original discrepancy
