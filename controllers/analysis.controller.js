@@ -315,7 +315,7 @@ class AnalysisController {
 
       // Fetch invoices and payments from SAP
       const sapInvoices = await Invoice.find({
-        DocDate: { $gte: extendedStartDate, $lte: extendedEndDate },
+        CreationDate: { $gte: extendedStartDate, $lte: extendedEndDate },
       }).lean();
 
       console.log("Retrieved SAP Data:", sapInvoices.length, "invoices");
@@ -330,7 +330,7 @@ class AnalysisController {
 
       // Filter SAP data for selected date range
       const selectedRangeSapData = allSapData.filter((invoice) => {
-        const invoiceDate = new Date(invoice.DocDate);
+        const invoiceDate = new Date(invoice.CreationDate);
         return invoiceDate >= SSD && invoiceDate <= EED;
       });
 
@@ -373,7 +373,7 @@ class AnalysisController {
           }
 
           const excelDate = new Date(excelEntry.date);
-          const sapDate = new Date(sapEntry.DocDate);
+          const sapDate = new Date(sapEntry.CreationDate);
           const dateDiff =
             Math.abs(excelDate - sapDate) / (1000 * 60 * 60 * 24);
 
@@ -490,7 +490,7 @@ class AnalysisController {
 
                 sameDay:
                   adjustedPaymentDate.setHours(0, 0, 0, 0) ===
-                  new Date(invoice.DocDate).setHours(0, 0, 0, 0),
+                  new Date(invoice.CreationDate).setHours(0, 0, 0, 0),
               };
             }
 
@@ -537,7 +537,7 @@ class AnalysisController {
                   );
 
                   if (
-                    new Date(invoice.DocDate).setHours(0, 0, 0, 0) ===
+                    new Date(invoice.CreationDate).setHours(0, 0, 0, 0) ===
                     adjustedPaymentDate.setHours(0, 0, 0, 0)
                   ) {
                     console.log(paymentLink.paymentNumber);
@@ -589,7 +589,7 @@ class AnalysisController {
 
       // Add SAP daily totals
       sapPOSSales.forEach((invoice) => {
-        const date = invoice.DocDate.toISOString().split("T")[0];
+        const date = invoice.CreationDate.toISOString().split("T")[0];
         if (!dailyComparisons[date]) {
           dailyComparisons[date] = { sapTotal: 0, excelTotal: 0 };
         }
