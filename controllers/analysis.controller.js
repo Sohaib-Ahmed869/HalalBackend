@@ -2222,6 +2222,36 @@ class AnalysisController {
       res.status(500).json({ error: error.message });
     }
   }
+
+  static async addNoteToAnalysis(req, res) {
+    try {
+      const { analysisId, note, note_category } = req.body;
+
+      console.log("Adding note to analysis", analysisId, note, note_category);
+      const analysis = await Analysis.findById(analysisId);
+
+      if (!analysis) {
+        return res.status(404).json({ error: "Analysis not found" });
+      }
+
+      if (note_category === "cash") {
+        analysis.cash_note = note;
+      } else if (note_category === "transfer") {
+        analysis.transfer_note = note;
+      } else if (note_category === "cheque") {
+        analysis.cheque_note = note;
+      } else if (note_category === "credit") {
+        analysis.bank_note = note;
+      }
+
+      await analysis.save();
+
+      res.json({ success: true, notes: analysis.notes });
+    } catch (error) {
+      console.error("Error adding a note:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
 }
 
 module.exports = AnalysisController;

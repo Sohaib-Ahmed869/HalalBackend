@@ -422,6 +422,18 @@ const AnalysisSchema = new mongoose.Schema({
   bankBankDifference: {
     type: Number,
   },
+  cash_note: {
+    type: String,
+  },
+  cheque_note: {
+    type: String,
+  },
+  bank_note: {
+    type: String,
+  },
+  transfer_note: {
+    type: String,
+  },
 });
 
 // Add validation for date fields
