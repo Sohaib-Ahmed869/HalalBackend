@@ -64,18 +64,45 @@ const getSalesOrdersByDateRange = async (req, res) => {
       DocumentStatus: "bost_Open", // Filter for open status only
     };
 
-    const [salesOrders, total] = await Promise.all([
-      SalesOrder.find(query).sort({ DocDate: -1 }).skip(skip).limit(limit),
-      SalesOrder.countDocuments(query),
+    const salesOrdersWithCustomer = await SalesOrder.aggregate([
+      {
+        $match: query
+      },
+      {
+        $lookup: {
+          from: 'customers', // The collection name in MongoDB
+          localField: 'CardCode',
+          foreignField: 'CardCode',
+          as: 'customer'
+        }
+      },
+      {
+        $unwind: {
+          path: '$customer',
+          preserveNullAndEmptyArrays: true // Keep sales orders without a matching customer
+        }
+      },
+      {
+        $sort: { DocDate: -1 } // Sort by date descending
+      },
+      {
+        $addFields: {
+          Email: { $ifNull: ['$customer.Email', null] }
+        }
+      },
+      { $skip: skip },
+      { $limit: limit }
     ]);
+
+    const total = await SalesOrder.countDocuments(query);
 
     res.status(200).json({
       success: true,
-      count: salesOrders.length,
+      count: salesOrdersWithCustomer.length,
       total,
       totalPages: Math.ceil(total / limit),
       currentPage: page,
-      data: salesOrders,
+      data: salesOrdersWithCustomer,
     });
   } catch (error) {
     res.status(500).json({
@@ -85,7 +112,6 @@ const getSalesOrdersByDateRange = async (req, res) => {
     });
   }
 };
-
 const getSalesOrderWithCustomer = async (req, res) => {
   try {
     const page = parseInt(req.query.page, 10) || 1;
