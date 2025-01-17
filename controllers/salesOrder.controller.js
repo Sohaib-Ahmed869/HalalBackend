@@ -57,7 +57,7 @@ const getSalesOrdersByDateRange = async (req, res) => {
     end.setHours(23, 59, 59, 999);
 
     const query = {
-      DocDate: {
+      CreationDate: {
         $gte: start,
         $lte: end,
       },
@@ -83,7 +83,7 @@ const getSalesOrdersByDateRange = async (req, res) => {
         }
       },
       {
-        $sort: { DocDate: -1 } // Sort by date descending
+        $sort: { CreationDate: -1 } // Sort by date descending
       },
       {
         $addFields: {
@@ -142,7 +142,7 @@ const getSalesOrderWithCustomer = async (req, res) => {
         }
       },
       {
-        $sort: { DocDate: -1 } // Sort by date descending
+        $sort: { CreationDate: -1 } // Sort by date descending
       },
       {
         $addFields: {
