@@ -172,6 +172,8 @@ const getSalesOrderWithCustomer = async (req, res) => {
     });
   }
 };
+
+
 module.exports = {
   getAllSalesOrders,
   getSalesOrdersByDateRange,
