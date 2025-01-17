@@ -18,6 +18,7 @@ const TagRoutes = require("./routes/tags.routes");
 const CreditNoteRoutes = require("./routes/creditNotes.routes");
 const ReturnsRoutes = require("./routes/returns.routes");
 const PaymentLinksRoutes = require("./routes/paymentLinks.routes");
+const SalesOrderRoutes = require("./routes/salesOrder.routes");
 dotenv.config();
 
 const app = express();
