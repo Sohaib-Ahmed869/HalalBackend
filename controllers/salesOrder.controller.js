@@ -1,5 +1,22 @@
-const SalesOrder = require('../models/salesOrder.model');
-const Customer = require('../models/customer.model');
+const SalesOrder = require("../models/salesOrder.model");
+const Customer = require("../models/customer.model");
+const nodemailer = require("nodemailer");
+const axios = require("axios");
+
+require("dotenv").config();
+
+console.log(process.env.ADYEN_API_KEY);
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: process.env.SMTP_PORT,
+  secure: true,
+  auth: {
+    user: process.env.SMTP_USER,
+    email: process.env.SMTP_EMAIL,
+    pass: process.env.SMTP_PASSWORD,
+  },
+});
 
 // Get paginated sales orders with open status
 const getAllSalesOrders = async (req, res) => {
@@ -66,32 +83,32 @@ const getSalesOrdersByDateRange = async (req, res) => {
 
     const salesOrdersWithCustomer = await SalesOrder.aggregate([
       {
-        $match: query
+        $match: query,
       },
       {
         $lookup: {
-          from: 'customers', // The collection name in MongoDB
-          localField: 'CardCode',
-          foreignField: 'CardCode',
-          as: 'customer'
-        }
+          from: "customers", // The collection name in MongoDB
+          localField: "CardCode",
+          foreignField: "CardCode",
+          as: "customer",
+        },
       },
       {
         $unwind: {
-          path: '$customer',
-          preserveNullAndEmptyArrays: true // Keep sales orders without a matching customer
-        }
+          path: "$customer",
+          preserveNullAndEmptyArrays: true, // Keep sales orders without a matching customer
+        },
       },
       {
-        $sort: { CreationDate: -1 } // Sort by date descending
+        $sort: { CreationDate: -1 }, // Sort by date descending
       },
       {
         $addFields: {
-          Email: { $ifNull: ['$customer.Email', null] }
-        }
+          Email: { $ifNull: ["$customer.Email", null] },
+        },
       },
       { $skip: skip },
-      { $limit: limit }
+      { $limit: limit },
     ]);
 
     const total = await SalesOrder.countDocuments(query);
@@ -120,40 +137,42 @@ const getSalesOrderWithCustomer = async (req, res) => {
 
     const query = {
       DocumentStatus: "bost_Open", // Filter for open status only
-    }
+    };
     const salesOrdersWithCustomer = await SalesOrder.aggregate([
       {
-        $match:{
-            DocumentStatus: "bost_Open"
-        }
+        $match: {
+          DocumentStatus: "bost_Open",
+        },
       },
       {
         $lookup: {
-          from: 'customers', // The collection name in MongoDB
-          localField: 'CardCode',
-          foreignField: 'CardCode',
-          as: 'customer'
-        }
+          from: "customers", // The collection name in MongoDB
+          localField: "CardCode",
+          foreignField: "CardCode",
+          as: "customer",
+        },
       },
       {
         $unwind: {
-          path: '$customer',
-          preserveNullAndEmptyArrays: true // Keep sales orders without a matching customer
-        }
+          path: "$customer",
+          preserveNullAndEmptyArrays: true, // Keep sales orders without a matching customer
+        },
       },
       {
-        $sort: { CreationDate: -1 } // Sort by date descending
+        $sort: { CreationDate: -1 }, // Sort by date descending
       },
       {
         $addFields: {
-          Email: { $ifNull: ['$customer.Email', null] }
-        }
+          Email: { $ifNull: ["$customer.Email", null] },
+        },
       },
       { $skip: skip },
-      { $limit: limit }
+      { $limit: limit },
     ]);
 
-    const total = await SalesOrder.countDocuments({ DocumentStatus: "bost_Open" });
+    const total = await SalesOrder.countDocuments({
+      DocumentStatus: "bost_Open",
+    });
 
     res.status(200).json({
       success: true,
@@ -161,21 +180,153 @@ const getSalesOrderWithCustomer = async (req, res) => {
       total,
       page,
       pages: Math.ceil(total / limit),
-      data: salesOrdersWithCustomer
+      data: salesOrdersWithCustomer,
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
-      error: 'Server Error',
-      details: error.message
+      error: "Server Error",
+      details: error.message,
     });
   }
 };
 
+const generatePaymentLink = async (req, res) => {
+  try {
+    const { docNum } = req.params;
+    const { email } = req.body;
+    // Fetch the sales order
+    const salesOrder = await SalesOrder.findOne({ DocNum: docNum });
+    if (!salesOrder) {
+      return res.status(404).json({
+        success: false,
+        error: "Sales order not found",
+      });
+    }
+
+    // Prepare the payment link request for Adyen
+    const paymentLinkRequest = {
+      reference: `SO-${salesOrder.DocNum}`,
+      amount: {
+        value: Math.round(salesOrder.DocTotal * 100), // Convert to cents
+        currency: salesOrder.DocCurrency || "EUR",
+      },
+      description: `Payment for Sales Order #${salesOrder.DocNum}`,
+      countryCode: "FR",
+      merchantAccount: process.env.ADYEN_MERCHANT_ACCOUNT,
+      shopperReference: salesOrder.CardCode,
+      shopperEmail: email,
+      lineItems: salesOrder.DocumentLines.map((line) => ({
+        quantity: line.Quantity,
+        amountIncludingTax: Math.round(line.LineTotal * 100),
+        description: line.ItemDescription,
+      })),
+    };
+
+    // Generate payment link through Adyen
+    const response = await axios.post(
+      `${process.env.ADYEN_API_BASE_URL}/paymentLinks`,
+      paymentLinkRequest,
+      {
+        headers: {
+          "X-API-KEY": process.env.ADYEN_API_KEY,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const paymentLink = response.data.url;
+
+    // Prepare email content
+    const emailHtml = `
+      <h2>Payment Request for Sales Order #${salesOrder.DocNum}</h2>
+      <p>Dear ${salesOrder.CardName},</p>
+      <p>Please find below the payment link for your order:</p>
+      <p><a href="${paymentLink}">Click here to make your payment</a></p>
+      
+      <h3>Order Details:</h3>
+      <table style="border-collapse: collapse; width: 100%;">
+        <thead>
+          <tr style="background-color: #f3f4f6;">
+            <th style="padding: 8px; border: 1px solid #ddd;">Item</th>
+            <th style="padding: 8px; border: 1px solid #ddd;">Quantity</th>
+            <th style="padding: 8px; border: 1px solid #ddd;">Price</th>
+            <th style="padding: 8px; border: 1px solid #ddd;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${salesOrder.DocumentLines.map(
+            (line) => `
+            <tr>
+              <td style="padding: 8px; border: 1px solid #ddd;">${
+                line.ItemDescription
+              }</td>
+              <td style="padding: 8px; border: 1px solid #ddd;">${
+                line.Quantity
+              }</td>
+              <td style="padding: 8px; border: 1px solid #ddd;">${new Intl.NumberFormat(
+                "en-US",
+                {
+                  style: "currency",
+                  currency: salesOrder.DocCurrency || "USD",
+                }
+              ).format(line.Price)}</td>
+              <td style="padding: 8px; border: 1px solid #ddd;">${new Intl.NumberFormat(
+                "en-US",
+                {
+                  style: "currency",
+                  currency: salesOrder.DocCurrency || "USD",
+                }
+              ).format(line.LineTotal)}</td>
+            </tr>
+          `
+          ).join("")}
+        </tbody>
+        <tfoot>
+          <tr style="background-color: #f3f4f6;">
+            <td colspan="3" style="padding: 8px; border: 1px solid #ddd;"><strong>Total</strong></td>
+            <td style="padding: 8px; border: 1px solid #ddd;"><strong>${new Intl.NumberFormat(
+              "en-US",
+              {
+                style: "currency",
+                currency: salesOrder.DocCurrency || "USD",
+              }
+            ).format(salesOrder.DocTotal)}</strong></td>
+          </tr>
+        </tfoot>
+      </table>
+      
+      <p>If you have any questions, please don't hesitate to contact us.</p>
+      <p>Thank you for your business!</p>
+    `;
+
+    // Send email
+    await transporter.sendMail({
+      from: process.env.SMTP_EMAIL,
+      to: email,
+      subject: `Payment Link for Sales Order #${salesOrder.DocNum}`,
+      html: emailHtml,
+    });
+
+    // Return success response
+    res.status(200).json({
+      success: true,
+      message: "Payment link generated and sent successfully",
+      paymentLink,
+    });
+  } catch (error) {
+    console.error("Error in generatePaymentLink:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to generate payment link",
+      details: error.message,
+    });
+  }
+};
 
 module.exports = {
   getAllSalesOrders,
   getSalesOrdersByDateRange,
-  getSalesOrderWithCustomer
+  getSalesOrderWithCustomer,
+  generatePaymentLink,
 };
