@@ -92,7 +92,15 @@ const getSalesOrderWithCustomer = async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 10;
     const skip = (page - 1) * limit;
 
+    const query = {
+      DocumentStatus: "bost_Open", // Filter for open status only
+    }
     const salesOrdersWithCustomer = await SalesOrder.aggregate([
+      {
+        $match:{
+            DocumentStatus: "bost_Open"
+        }
+      },
       {
         $lookup: {
           from: 'customers', // The collection name in MongoDB
@@ -119,7 +127,7 @@ const getSalesOrderWithCustomer = async (req, res) => {
       { $limit: limit }
     ]);
 
-    const total = await SalesOrder.countDocuments();
+    const total = await SalesOrder.countDocuments({ DocumentStatus: "bost_Open" });
 
     res.status(200).json({
       success: true,
