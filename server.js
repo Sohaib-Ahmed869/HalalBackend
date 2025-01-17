@@ -19,6 +19,7 @@ const CreditNoteRoutes = require("./routes/creditNotes.routes");
 const ReturnsRoutes = require("./routes/returns.routes");
 const PaymentLinksRoutes = require("./routes/paymentLinks.routes");
 const SalesOrderRoutes = require("./routes/salesOrder.routes");
+const CustomerRoutes = require("./routes/customer.routes");
 dotenv.config();
 
 const app = express();
@@ -74,6 +75,7 @@ app.use("/api/credit-notes", CreditNoteRoutes);
 app.use("/api/returns", ReturnsRoutes);
 app.use("/api/tags", TagRoutes);
 app.use("/api/payment-links", PaymentLinksRoutes);
+app.use("/api/customers", CustomerRoutes);
 app.use("/api/sales-orders", SalesOrderRoutes);
 
 const PORT = process.env.PORT || 5000;
