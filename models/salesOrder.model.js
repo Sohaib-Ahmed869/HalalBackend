@@ -515,6 +515,10 @@ const OrderSchema = new Schema(
       type: String,
       default: null,
     },
+    payment_status: {
+      type: String,
+      default: null,
+    },
     Document_ApprovalRequests: [DocumentApprovalRequestSchema],
     DocumentLines: [DocumentLineSchema],
   },

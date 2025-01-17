@@ -367,6 +367,10 @@ const getUpdateOnPaymentLink = async (req, res) => {
     //   await salesOrder.save();
     // }
 
+    salesOrder.payment_status = paymentStatus;
+
+    await salesOrder.save();
+
     res.status(200).json({
       success: true,
       message: "Payment status updated successfully",
