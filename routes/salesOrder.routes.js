@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const {
   getAllSalesOrders,
-  getSalesOrdersByDateRange
+  getSalesOrdersByDateRange,
+  getSalesOrderWithCustomer
 } = require('../controllers/salesOrder.controller');
 
 // @route   GET /api/sales-orders
@@ -14,5 +15,6 @@ router.get('/', getAllSalesOrders);
 // @desc    Get sales orders by date range
 // @access  Private
 router.get('/date-range', getSalesOrdersByDateRange);
+router.get('/with-customer', getSalesOrderWithCustomer);
 
 module.exports = router;
