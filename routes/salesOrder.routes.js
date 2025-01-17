@@ -5,6 +5,7 @@ const {
   getSalesOrdersByDateRange,
   getSalesOrderWithCustomer,
   generatePaymentLink,
+  getUpdateOnPaymentLink
 } = require("../controllers/salesOrder.controller");
 
 // @route   GET /api/sales-orders
@@ -18,5 +19,7 @@ router.get("/", getAllSalesOrders);
 router.get("/date-range", getSalesOrdersByDateRange);
 router.get("/with-customer", getSalesOrderWithCustomer);
 router.post("/payment-link/:docNum", generatePaymentLink); 
+router.get("/getUpdate/:docNum", getUpdateOnPaymentLink);
+
 
 module.exports = router;

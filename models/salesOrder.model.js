@@ -507,6 +507,14 @@ const OrderSchema = new Schema(
     U_U_ROUTEPAYMETHOD: String,
     U_U_ROUTEORDER: String,
     U_U_ROUTEPAYAMOUNT: String,
+    Link_sent: {
+      type: Boolean,
+      default: false,
+    },
+    Payment_id: {
+      type: String,
+      default: null,
+    },
     Document_ApprovalRequests: [DocumentApprovalRequestSchema],
     DocumentLines: [DocumentLineSchema],
   },

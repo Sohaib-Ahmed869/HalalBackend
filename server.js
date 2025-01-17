@@ -77,6 +77,10 @@ app.use("/api/tags", TagRoutes);
 app.use("/api/payment-links", PaymentLinksRoutes);
 app.use("/api/customers", CustomerRoutes);
 app.use("/api/sales-orders", SalesOrderRoutes);
+app.post("/api/verify", (req, res) => {
+  console.log(req.body);
+  res.send("Received");
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

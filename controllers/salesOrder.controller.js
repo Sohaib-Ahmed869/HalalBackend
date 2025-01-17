@@ -237,40 +237,50 @@ const generatePaymentLink = async (req, res) => {
 
     const paymentLink = response.data.url;
 
+    //get the payment id
+    const paymentId = response.data.id;
+
+    //convert to ISO string
+    const expiryDate = new Date(response.data.expiresAt).toISOString();
+
+    // Save the payment id to the sales order
+    salesOrder.Payment_id = paymentId;
+
+    //set link sent to true
+    salesOrder.Link_sent = true;
+
     // Prepare email content
     const emailHtml = `
-      <h2>Payment Request for Sales Order #${salesOrder.DocNum}</h2>
-      <p>Dear ${salesOrder.CardName},</p>
-      <p>Please find below the payment link for your order:</p>
-      <p><a href="${paymentLink}">Click here to make your payment</a></p>
-      
-      <h3>Order Details:</h3>
-      <table style="border-collapse: collapse; width: 100%;">
-        <thead>
-          <tr style="background-color: #f3f4f6;">
-            <th style="padding: 8px; border: 1px solid #ddd;">Item</th>
-            <th style="padding: 8px; border: 1px solid #ddd;">Quantity</th>
-            <th style="padding: 8px; border: 1px solid #ddd;">Price</th>
-            <th style="padding: 8px; border: 1px solid #ddd;">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${salesOrder.DocumentLines.map(
-            (line) => `
-            <tr>
-              <td style="padding: 8px; border: 1px solid #ddd;">${
-                line.ItemDescription
-              }</td>
-              <td style="padding: 8px; border: 1px solid #ddd;">${
-                line.Quantity
-              }</td>
-              <td style="padding: 8px; border: 1px solid #ddd;">${new Intl.NumberFormat(
-                "en-US",
-                {
-                  style: "currency",
-                  currency: salesOrder.DocCurrency || "USD",
-                }
-              ).format(line.Price)}</td>
+    <h2>Payment Request for Sales Order #${salesOrder.DocNum}</h2>
+    <p>Dear ${salesOrder.CardName},</p>
+    <p>Please find below the payment link for your order:</p>
+    <p><a href="${paymentLink}">Click here to make your payment</a></p>
+    <p>The payment link will expire on ${expiryDate.split("T")[0]}.</p>
+    <h3>Order Details:</h3>
+    <table style="border-collapse: collapse; width: 100%;">
+    <thead>
+    <tr style="background-color: #f3f4f6;">
+    <th style="padding: 8px; border: 1px solid #ddd;">Item</th>
+    <th style="padding: 8px; border: 1px solid #ddd;">Quantity</th>
+    <th style="padding: 8px; border: 1px solid #ddd;">Price</th>
+    <th style="padding: 8px; border: 1px solid #ddd;">Total</th>
+    </tr>
+    </thead>
+    <tbody>
+    ${salesOrder.DocumentLines.map(
+      (line) => `
+      <tr>
+      <td style="padding: 8px; border: 1px solid #ddd;">${
+        line.ItemDescription
+      }</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${line.Quantity}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${new Intl.NumberFormat(
+            "en-US",
+            {
+              style: "currency",
+              currency: salesOrder.DocCurrency || "USD",
+            }
+          ).format(line.Price)}</td>
               <td style="padding: 8px; border: 1px solid #ddd;">${new Intl.NumberFormat(
                 "en-US",
                 {
@@ -278,27 +288,27 @@ const generatePaymentLink = async (req, res) => {
                   currency: salesOrder.DocCurrency || "USD",
                 }
               ).format(line.LineTotal)}</td>
-            </tr>
-          `
-          ).join("")}
-        </tbody>
-        <tfoot>
-          <tr style="background-color: #f3f4f6;">
-            <td colspan="3" style="padding: 8px; border: 1px solid #ddd;"><strong>Total</strong></td>
-            <td style="padding: 8px; border: 1px solid #ddd;"><strong>${new Intl.NumberFormat(
-              "en-US",
-              {
-                style: "currency",
-                currency: salesOrder.DocCurrency || "USD",
-              }
-            ).format(salesOrder.DocTotal)}</strong></td>
-          </tr>
-        </tfoot>
-      </table>
-      
-      <p>If you have any questions, please don't hesitate to contact us.</p>
-      <p>Thank you for your business!</p>
-    `;
+                  </tr>
+                  `
+    ).join("")}
+                </tbody>
+                <tfoot>
+                <tr style="background-color: #f3f4f6;">
+                <td colspan="3" style="padding: 8px; border: 1px solid #ddd;"><strong>Total</strong></td>
+                <td style="padding: 8px; border: 1px solid #ddd;"><strong>${new Intl.NumberFormat(
+                  "en-US",
+                  {
+                    style: "currency",
+                    currency: salesOrder.DocCurrency || "USD",
+                  }
+                ).format(salesOrder.DocTotal)}</strong></td>
+                </tr>
+                </tfoot>
+                </table>
+
+                <p>If you have any questions, please don't hesitate to contact us.</p>
+                <p>Thank you for your business!</p>
+                `;
 
     // Send email
     await transporter.sendMail({
@@ -307,6 +317,8 @@ const generatePaymentLink = async (req, res) => {
       subject: `Payment Link for Sales Order #${salesOrder.DocNum}`,
       html: emailHtml,
     });
+
+    await salesOrder.save();
 
     // Return success response
     res.status(200).json({
@@ -324,9 +336,56 @@ const generatePaymentLink = async (req, res) => {
   }
 };
 
+const getUpdateOnPaymentLink = async (req, res) => {
+  try {
+    const { docNum } = req.params;
+    const salesOrder = await SalesOrder.findOne({ DocNum: docNum });
+
+    if (!salesOrder) {
+      return res.status(404).json({
+        success: false,
+        error: "Sales order not found",
+      });
+    }
+
+    // send request to Adyen to get payment status
+    const response = await axios.get(
+      `${process.env.ADYEN_API_BASE_URL}/paymentLinks/${salesOrder.Payment_id}`,
+      {
+        headers: {
+          "X-API-KEY": process.env.ADYEN_API_KEY,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const paymentStatus = response.data.status;
+
+    // if (paymentStatus === "PAID") {
+    //   // update the sales order status to paid
+    //   salesOrder.DocumentStatus = "bost_Paid";
+    //   await salesOrder.save();
+    // }
+
+    res.status(200).json({
+      success: true,
+      message: "Payment status updated successfully",
+      paymentStatus,
+    });
+  } catch (error) {
+    console.error("Error in getUpdateOnPaymentLink:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to update payment status",
+      details: error.message,
+    });
+  }
+};
+
 module.exports = {
   getAllSalesOrders,
   getSalesOrdersByDateRange,
   getSalesOrderWithCustomer,
   generatePaymentLink,
+  getUpdateOnPaymentLink,
 };
