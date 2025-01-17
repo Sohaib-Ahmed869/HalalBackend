@@ -18,6 +18,7 @@ const TagRoutes = require("./routes/tags.routes");
 const CreditNoteRoutes = require("./routes/creditNotes.routes");
 const ReturnsRoutes = require("./routes/returns.routes");
 const PaymentLinksRoutes = require("./routes/paymentLinks.routes");
+const CustomerRoutes = require("./routes/customer.routes");
 dotenv.config();
 
 const app = express();
@@ -73,6 +74,7 @@ app.use("/api/credit-notes", CreditNoteRoutes);
 app.use("/api/returns", ReturnsRoutes);
 app.use("/api/tags", TagRoutes);
 app.use("/api/payment-links", PaymentLinksRoutes);
+app.use("/api/customers", CustomerRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
