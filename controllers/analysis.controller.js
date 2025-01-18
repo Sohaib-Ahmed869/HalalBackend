@@ -321,9 +321,9 @@ class AnalysisController {
       console.log("Retrieved SAP Data:", sapInvoices.length, "invoices");
       const sapPayments = [];
 
-      // const flattenedPayments = sapPayments.map(
-      //   AnalysisController.flattenPaymentData
-      // );
+      const flattenedPayments = sapPayments.map(
+        AnalysisController.flattenPaymentData
+      );
 
       // Fetch SAP invoices for extended date range
       const allSapData = [...sapInvoices];
@@ -898,6 +898,16 @@ class AnalysisController {
   static async compareBankData(req, res) {
     try {
       const { dateRange, analysisId } = req.body;
+      console.log("Received Bank Data:", dateRange);
+
+      //get only the date part of the date range
+      let startDate = new Date(dateRange.start);
+      //get the start date
+      startDate.setHours(0, 0, 0, 0);
+
+      let endingDate = new Date(dateRange.end);
+      //get the end date
+      endingDate.setHours(23, 59, 59, 999);
 
       let endDate = new Date(dateRange.end);
       //add 15 days to the end date
@@ -916,18 +926,10 @@ class AnalysisController {
       // 2. Fetch sales data within date range
       const salesData = await Sale.find({
         date: {
-          $gte: new Date(dateRange.start),
-          $lte: new Date(dateRange.end),
+          $gte: new Date(startDate),
+          $lte: new Date(endingDate),
         },
       }).sort({ date: 1 });
-
-      // 2.1 Fetch invoices data within date range
-      const invoicesData = await Invoice.find({
-        DocDate: {
-          $gte: new Date(dateRange.start),
-          $lte: new Date(dateRange.end),
-        },
-      }).sort({ DocDate: 1 });
 
       // 3. Process and categorize bank statements
       const categorizedBankStatements = bankStatements.map((stmt) => ({
@@ -1034,6 +1036,8 @@ class AnalysisController {
       );
 
       const excelTotal = salesTotals.totalAmount;
+
+      console.log(salesTotals);
 
       if (analysisId) {
         const analysis = await Analysis.findById(analysisId);
