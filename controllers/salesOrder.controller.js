@@ -193,9 +193,10 @@ const loginToSAP = async () => {
   try {
     const loginData = {
       CompanyDB: process.env.COMPANY_DB,
-      UserName: process.env.SAP_USERNAME,
-      Password: process.env.SAP_PASSWORD,
+      UserName: process.env.USER_NAME,
+      Password: process.env.PASSWORD,
     };
+    console.log(loginData);
 
     console.log("Attempting to login to SAP...");
 
@@ -505,6 +506,9 @@ const syncNewOrders = async (req, res) => {
         failed: [],
       },
     };
+    const cookies = await loginToSAP();
+    console.log(cookies);
+
 
     let nextLink = `${process.env.BASE_URL}/Orders?$filter=CreationDate ge '${formattedToday}' and CreationDate lt '${formattedTomorrow}'&$orderby=CreationDate`;
 
@@ -514,7 +518,7 @@ const syncNewOrders = async (req, res) => {
 
         const response = await axios.get(nextLink, {
           headers: {
-            Cookie: req.headers.cookie,
+            Cookie: cookies,
           },
         });
 
