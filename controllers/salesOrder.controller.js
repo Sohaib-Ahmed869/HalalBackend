@@ -5,7 +5,6 @@ const axios = require("axios");
 
 require("dotenv").config();
 
-
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: process.env.SMTP_PORT,
@@ -190,6 +189,44 @@ const getSalesOrderWithCustomer = async (req, res) => {
   }
 };
 
+const loginToSAP = async () => {
+  try {
+    const loginData = {
+      CompanyDB: process.env.COMPANY_DB,
+      UserName: process.env.SAP_USERNAME,
+      Password: process.env.SAP_PASSWORD,
+    };
+
+    console.log("Attempting to login to SAP...");
+
+    const response = await axios.post(
+      `${process.env.BASE_URL}/Login`,
+      loginData,
+      {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const cookies = response.headers["set-cookie"];
+    if (!cookies) {
+      throw new Error("No session cookies received from SAP");
+    }
+
+    // Format cookies for subsequent requests
+    const sessionCookie = cookies
+      .map((cookie) => cookie.split(";")[0])
+      .join("; ");
+    console.log("Successfully logged in to SAP");
+
+    return sessionCookie;
+  } catch (error) {
+    console.error("SAP Login failed:", error.message);
+    throw error;
+  }
+};
+
 const generatePaymentLink = async (req, res) => {
   try {
     const { docNum } = req.params;
@@ -250,10 +287,71 @@ const generatePaymentLink = async (req, res) => {
 
     // Prepare email content
     const emailHtml = `
+    <h2>Demande de Paiement pour la Commande n°${salesOrder.DocNum}</h2>
+    <p>Chère ${salesOrder.CardName},</p>
+    <p>Veuillez trouver ci-dessous le lien de paiement pour votre commande :</p>
+    <p><a href="${paymentLink}">Cliquez ici pour effectuer votre paiement</a></p>
+    <p style="font-weight: bold;">Si vous souhaitez effectuer le paiement après 30 jours, veuillez choisir l'option « Payer par facture pour les entreprises » et remplir les informations requises.</p>
+    <p>Le lien de paiement expirera le ${expiryDate.split("T")[0]}.</p>
+    <h3>Détails de la commande :</h3>
+    <table style="border-collapse: collapse; width: 100%;">
+    <thead>
+    <tr style="background-color: #f3f4f6;">
+    <th style="padding: 8px; border: 1px solid #ddd;">Article</th>
+    <th style="padding: 8px; border: 1px solid #ddd;">Quantité</th>
+    <th style="padding: 8px; border: 1px solid #ddd;">Prix</th>
+    <th style="padding: 8px; border: 1px solid #ddd;">Total</th>
+    </tr>
+    </thead>
+    <tbody>
+    ${salesOrder.DocumentLines.map(
+      (line) => `
+      <tr>
+      <td style="padding: 8px; border: 1px solid #ddd;">${
+        line.ItemDescription
+      }</td>
+      <td style="padding: 8px; border: 1px solid #ddd;">${line.Quantity}</td>
+      <td style="padding: 8px; border: 1px solid #ddd;">${new Intl.NumberFormat(
+        "fr-FR",
+        {
+          style: "currency",
+          currency: salesOrder.DocCurrency || "EUR",
+        }
+      ).format(line.Price)}</td>
+      <td style="padding: 8px; border: 1px solid #ddd;">${new Intl.NumberFormat(
+        "fr-FR",
+        {
+          style: "currency",
+          currency: salesOrder.DocCurrency || "EUR",
+        }
+      ).format(line.LineTotal)}</td>
+      </tr>
+      `
+    ).join("")}
+    </tbody>
+    <tfoot>
+    <tr style="background-color: #f3f4f6;">
+    <td colspan="3" style="padding: 8px; border: 1px solid #ddd;"><strong>Total</strong></td>
+    <td style="padding: 8px; border: 1px solid #ddd;"><strong>${new Intl.NumberFormat(
+      "fr-FR",
+      {
+        style: "currency",
+        currency: salesOrder.DocCurrency || "EUR",
+      }
+    ).format(salesOrder.DocTotal)}</strong></td>
+    </tr>
+    </tfoot>
+    </table>
+    <p>Si vous avez des questions, n'hésitez pas à nous contacter.</p>
+    <p>Merci pour votre confiance !</p>
+
+    <hr />
+
     <h2>Payment Request for Sales Order #${salesOrder.DocNum}</h2>
     <p>Dear ${salesOrder.CardName},</p>
     <p>Please find below the payment link for your order:</p>
     <p><a href="${paymentLink}">Click here to make your payment</a></p>
+    <p style="font-weight: bold;">If you want to proceed with payment after 30 days, please choose the option "Pay by Invoice for Businesses" and proceed to fill out the required information.</p>
     <p>The payment link will expire on ${expiryDate.split("T")[0]}.</p>
     <h3>Order Details:</h3>
     <table style="border-collapse: collapse; width: 100%;">
@@ -272,42 +370,41 @@ const generatePaymentLink = async (req, res) => {
       <td style="padding: 8px; border: 1px solid #ddd;">${
         line.ItemDescription
       }</td>
-        <td style="padding: 8px; border: 1px solid #ddd;">${line.Quantity}</td>
-          <td style="padding: 8px; border: 1px solid #ddd;">${new Intl.NumberFormat(
-            "en-US",
-            {
-              style: "currency",
-              currency: salesOrder.DocCurrency || "USD",
-            }
-          ).format(line.Price)}</td>
-              <td style="padding: 8px; border: 1px solid #ddd;">${new Intl.NumberFormat(
-                "en-US",
-                {
-                  style: "currency",
-                  currency: salesOrder.DocCurrency || "USD",
-                }
-              ).format(line.LineTotal)}</td>
-                  </tr>
-                  `
+      <td style="padding: 8px; border: 1px solid #ddd;">${line.Quantity}</td>
+      <td style="padding: 8px; border: 1px solid #ddd;">${new Intl.NumberFormat(
+        "en-US",
+        {
+          style: "currency",
+          currency: salesOrder.DocCurrency || "USD",
+        }
+      ).format(line.Price)}</td>
+      <td style="padding: 8px; border: 1px solid #ddd;">${new Intl.NumberFormat(
+        "en-US",
+        {
+          style: "currency",
+          currency: salesOrder.DocCurrency || "USD",
+        }
+      ).format(line.LineTotal)}</td>
+      </tr>
+      `
     ).join("")}
-                </tbody>
-                <tfoot>
-                <tr style="background-color: #f3f4f6;">
-                <td colspan="3" style="padding: 8px; border: 1px solid #ddd;"><strong>Total</strong></td>
-                <td style="padding: 8px; border: 1px solid #ddd;"><strong>${new Intl.NumberFormat(
-                  "en-US",
-                  {
-                    style: "currency",
-                    currency: salesOrder.DocCurrency || "USD",
-                  }
-                ).format(salesOrder.DocTotal)}</strong></td>
-                </tr>
-                </tfoot>
-                </table>
-
-                <p>If you have any questions, please don't hesitate to contact us.</p>
-                <p>Thank you for your business!</p>
-                `;
+    </tbody>
+    <tfoot>
+    <tr style="background-color: #f3f4f6;">
+    <td colspan="3" style="padding: 8px; border: 1px solid #ddd;"><strong>Total</strong></td>
+    <td style="padding: 8px; border: 1px solid #ddd;"><strong>${new Intl.NumberFormat(
+      "en-US",
+      {
+        style: "currency",
+        currency: salesOrder.DocCurrency || "USD",
+      }
+    ).format(salesOrder.DocTotal)}</strong></td>
+    </tr>
+    </tfoot>
+    </table>
+    <p>If you have any questions, please don't hesitate to contact us.</p>
+    <p>Thank you for your business!</p>
+`;
 
     // Send email
     await transporter.sendMail({
@@ -385,10 +482,142 @@ const getUpdateOnPaymentLink = async (req, res) => {
   }
 };
 
+const syncNewOrders = async (req, res) => {
+  try {
+    console.log("Starting manual sync for today's orders...");
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const formattedToday = today.toISOString();
+    const formattedTomorrow = tomorrow.toISOString();
+
+    const stats = {
+      totalProcessed: 0,
+      newlyStored: 0,
+      skipped: 0,
+      failed: 0,
+      details: {
+        stored: [],
+        skipped: [],
+        failed: [],
+      },
+    };
+
+    let nextLink = `${process.env.BASE_URL}/Orders?$filter=CreationDate ge '${formattedToday}' and CreationDate lt '${formattedTomorrow}'&$orderby=CreationDate`;
+
+    while (nextLink) {
+      try {
+        console.log(`Fetching batch from: ${nextLink}`);
+
+        const response = await axios.get(nextLink, {
+          headers: {
+            Cookie: req.headers.cookie,
+          },
+        });
+
+        const currentBatch = response.data.value;
+        console.log(`Processing batch of ${currentBatch.length} orders`);
+
+        for (const order of currentBatch) {
+          try {
+            const existingOrder = await SalesOrder.findOne({
+              DocEntry: order.DocEntry,
+            });
+
+            if (!existingOrder) {
+              const orderWithMetadata = {
+                ...order,
+                syncedAt: new Date(),
+                lastUpdated: new Date(),
+              };
+
+              await SalesOrder.create(orderWithMetadata);
+              stats.newlyStored++;
+              stats.details.stored.push({
+                docEntry: order.DocEntry,
+                docNum: order.DocNum,
+                cardName: order.CardName,
+                docTotal: order.DocTotal,
+                docDate: order.DocDate,
+              });
+            } else {
+              stats.skipped++;
+              stats.details.skipped.push({
+                docEntry: order.DocEntry,
+                docNum: order.DocNum,
+              });
+            }
+
+            stats.totalProcessed++;
+          } catch (error) {
+            stats.failed++;
+            stats.details.failed.push({
+              docEntry: order.DocEntry,
+              docNum: order.DocNum,
+              error: error.message,
+            });
+            console.error(`Failed to process order ${order.DocEntry}:`, error);
+          }
+        }
+
+        // Get next batch URL if available
+        nextLink = response.data["odata.nextLink"];
+        if (nextLink && nextLink.startsWith("Order")) {
+          nextLink = `${process.env.BASE_URL}/${nextLink}`;
+        }
+      } catch (error) {
+        console.error("Error processing batch:", error);
+        return res.status(500).json({
+          success: false,
+          error: "Batch processing failed",
+          details: error.message,
+        });
+      }
+    }
+
+    // Prepare summary response
+    const summary = {
+      date: today.toLocaleDateString(),
+      stats: {
+        totalProcessed: stats.totalProcessed,
+        newlyStored: stats.newlyStored,
+        skipped: stats.skipped,
+        failed: stats.failed,
+      },
+      newOrders: stats.details.stored.map((order) => ({
+        docEntry: order.docEntry,
+        docNum: order.docNum,
+        cardName: order.cardName,
+        docTotal: order.docTotal,
+        docDate: order.docDate,
+      })),
+      skippedOrders: stats.details.skipped,
+      failedOrders: stats.details.failed,
+    };
+
+    res.status(200).json({
+      success: true,
+      message: "Sync completed successfully",
+      summary,
+    });
+  } catch (error) {
+    console.error("Order sync failed:", error);
+    res.status(500).json({
+      success: false,
+      error: "Sync failed",
+      details: error.message,
+    });
+  }
+};
+
 module.exports = {
   getAllSalesOrders,
   getSalesOrdersByDateRange,
   getSalesOrderWithCustomer,
   generatePaymentLink,
   getUpdateOnPaymentLink,
+  syncNewOrders,
 };
