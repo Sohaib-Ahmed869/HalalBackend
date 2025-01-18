@@ -158,6 +158,7 @@ const SAPInvoiceSchema = new mongoose.Schema({
   U_EPOSNo: String,
   DocNum: String,
   paymentMethod: String,
+  CreationDate: Date,
   paymentDate: Date,
   _id: mongoose.Schema.Types.ObjectId,
   source: {

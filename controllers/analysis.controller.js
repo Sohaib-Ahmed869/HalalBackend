@@ -321,9 +321,9 @@ class AnalysisController {
       console.log("Retrieved SAP Data:", sapInvoices.length, "invoices");
       const sapPayments = [];
 
-      const flattenedPayments = sapPayments.map(
-        AnalysisController.flattenPaymentData
-      );
+      // const flattenedPayments = sapPayments.map(
+      //   AnalysisController.flattenPaymentData
+      // );
 
       // Fetch SAP invoices for extended date range
       const allSapData = [...sapInvoices];
