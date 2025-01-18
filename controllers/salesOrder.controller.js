@@ -5,7 +5,6 @@ const axios = require("axios");
 
 require("dotenv").config();
 
-console.log(process.env.ADYEN_API_KEY);
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
