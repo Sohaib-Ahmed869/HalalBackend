@@ -6,6 +6,7 @@ const {
   getPaymentStats,
   toggleVerified,
   processCSV,
+  processExcel,
   upload,
 } = require("../controllers/payment.controller");
 const multer = require("multer");
@@ -14,7 +15,7 @@ const multer = require("multer");
 router.get("/", getPayments);
 
 // Sync payments for a specific period
-router.post("/sync", syncPayments)
+router.post("/sync", syncPayments);
 
 // Get payment statistics
 router.get("/stats", getPaymentStats);
@@ -26,6 +27,12 @@ router.post(
   "/upload-csv",
   multer({ dest: "temp/csv/" }).single("file"),
   processCSV
+);
+
+router.post(
+  "/upload-excel",
+  multer({ dest: "temp/excel/" }).single("file"),
+  processExcel
 );
 
 module.exports = router;

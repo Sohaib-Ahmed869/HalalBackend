@@ -2,6 +2,7 @@ const axios = require("axios");
 const Payment = require("../models/payment.model");
 const multer = require("multer");
 const csv = require("csv-parser");
+const XLSX = require("xlsx");
 const fs = require("fs");
 
 const upload = multer({
@@ -385,6 +386,181 @@ class PaymentController {
   }
 
   // Helper function to process a batch of payments
+  static async processExcel(req, res) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const batchSize = 500;
+      let records = [];
+      let totalProcessed = 0;
+      let errors = [];
+      let rowNumber = 0;
+
+      // Helper function to parse date format DD/MM/YY
+      const parseDate = (dateStr) => {
+        if (!dateStr) return null;
+        
+        try {
+          // Handle DD/MM/YY format
+          if (typeof dateStr === 'string' && dateStr.includes('/')) {
+            const [day, month, year] = dateStr.split('/').map(num => num.trim());
+            // Ensure all components exist
+            if (!day || !month || !year) return null;
+            
+            // Convert YY to YYYY
+            const fullYear = year.length === 2 ? `20${year}` : year;
+            
+            // Create date string in ISO format (YYYY-MM-DD)
+            const dateString = `${fullYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+            const parsed = new Date(dateString);
+            
+            // Validate the parsed date
+            if (isNaN(parsed.getTime())) return null;
+            return parsed;
+          }
+          
+          // If it's already a Date object
+          if (dateStr instanceof Date && !isNaN(dateStr.getTime())) {
+            return dateStr;
+          }
+          
+          return null;
+        } catch (error) {
+          console.error(`Error parsing date ${dateStr}:`, error);
+          return null;
+        }
+      };
+
+      // Helper function to clean amount
+      const cleanAmount = (amount) => {
+        if (typeof amount === 'number') return amount;
+        if (!amount) return 0;
+        return parseFloat(amount.toString().replace(/[^\d.-]/g, "")) || 0;
+      };
+
+      try {
+        // Read the Excel file
+        const workbook = XLSX.readFile(req.file.path, {
+          cellDates: true,
+          cellNF: true,
+          cellText: false
+        });
+
+        // Assume first sheet
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        
+        // Convert to JSON with raw values
+        const rows = XLSX.utils.sheet_to_json(worksheet, {
+          header: 1,
+          raw: true,
+          dateNF: 'dd/mm/yy'
+        });
+
+        // Skip header row
+        for (let i = 1; i < rows.length; i++) {
+          rowNumber = i + 1;
+          const row = rows[i];
+
+          try {
+            // Ensure we have enough columns
+            if (row.length < 14) {
+              throw new Error(`Row ${rowNumber} has insufficient columns`);
+            }
+
+            // Map columns according to the actual data structure
+            // [index, CreationDate, CardCode, DocNum, CardName, PostingDate, CashAmount, CreditAmount, ChequeAmount, TransferAmount, DocTotal, TransactionNumber, InternalNumber, UserSignature]
+            const docDate = parseDate(row[5]); // Posting Date (index 5)
+            const creationDate = parseDate(row[1]); // Creation Date (index 1)
+
+            // Skip row if crucial dates are invalid
+            if (!docDate || !creationDate) {
+              throw new Error(`Invalid dates - DocDate: ${row[5]}, CreationDate: ${row[1]}`);
+            }
+
+            const payment = {
+              DocEntry: parseInt(row[12]), // Internal Number (index 12)
+              DocNum: parseInt(row[3]), // Document Number (index 3)
+              DocDate: docDate,
+              CardCode: row[2], // Customer/Supplier No. (index 2)
+              CardName: row[4], // Customer/Supplier Name (index 4)
+              CashSum: cleanAmount(row[6]), // Cash Amount (index 6)
+              CreditSum: cleanAmount(row[7]), // Credit Amount (index 7)
+              TransferSum: cleanAmount(row[9]), // Transfer Amount (index 9)
+              CheckSum: cleanAmount(row[8]), // Cheque Amount (index 8)
+              DocTotal: cleanAmount(row[10]), // Document Total (index 10)
+              CreationDate: creationDate,
+              TransactionNumber: row[11]?.toString(), // Transaction Number (index 11)
+              UserSignature: row[13]?.toString(), // User Signature (index 13)
+              verified: false,
+              dateStored: new Date()
+            };
+
+            // Validate required fields
+            if (!payment.DocEntry || !payment.DocNum) {
+              throw new Error(`Missing required fields - DocEntry: ${payment.DocEntry}, DocNum: ${payment.DocNum}`);
+            }
+
+            records.push(payment);
+
+            // Process in batches
+            if (records.length === batchSize) {
+              await saveRecords(records);
+              totalProcessed += records.length;
+              console.log(`Processed and saved ${totalProcessed} payments`);
+              records = []; // Clear the array after saving
+            }
+          } catch (error) {
+            errors.push({
+              row: {
+                rowNumber,
+                data: row
+              },
+              error: error.message
+            });
+          }
+        }
+
+        // Save any remaining records
+        if (records.length > 0) {
+          await saveRecords(records);
+          totalProcessed += records.length;
+        }
+
+        // Clean up uploaded file
+        const fs = require('fs');
+        fs.unlink(req.file.path, (err) => {
+          if (err) console.error("Error deleting file:", err);
+        });
+
+        res.json({
+          message: "Excel processing completed",
+          stats: {
+            totalProcessed,
+            errorsCount: errors.length
+          },
+          errors: errors.length > 0 ? errors.slice(0, 10) : undefined
+        });
+
+      } catch (error) {
+        throw new Error(`Error processing Excel file: ${error.message}`);
+      }
+
+    } catch (error) {
+      console.error("Error processing Excel:", error);
+      if (req.file && req.file.path) {
+        const fs = require('fs');
+        fs.unlink(req.file.path, (err) => {
+          if (err) console.error("Error deleting file:", err);
+        });
+      }
+      res.status(500).json({ 
+        error: error.message || "Failed to process Excel file" 
+      });
+    }
+  }
 }
 async function saveRecords(records) {
   try {
@@ -412,5 +588,6 @@ module.exports = {
   getPaymentStats: PaymentController.getPaymentStats,
   toggleVerified: PaymentController.toggleVerified,
   processCSV: PaymentController.processCSV,
+  processExcel: PaymentController.processExcel,
   upload: upload,
 };
