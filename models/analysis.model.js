@@ -435,6 +435,18 @@ const AnalysisSchema = new mongoose.Schema({
   transfer_note: {
     type: String,
   },
+  bank_references: {
+    type: Array,
+  },
+  cash_references: {
+    type: Array,
+  },
+  cheque_references: {
+    type: Array,
+  },
+  transfer_references: {
+    type: Array,
+  },
 });
 
 // Add validation for date fields

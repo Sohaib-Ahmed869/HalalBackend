@@ -427,7 +427,7 @@ class AnalysisController {
           }
         });
 
-        if (bestMatch && bestScore > 0.6) {
+        if (bestMatch && bestScore > 0.01) {
           matches.push({
             date: excelEntry.date,
             excelClient: excelEntry.client,
@@ -793,7 +793,7 @@ class AnalysisController {
         sapCustomer: invoice.sapCustomer,
         excelAmount: Number(originalDiscrepancy.amount),
         sapAmount: Number(invoice.sapAmount),
-        category: originalDiscrepancy.category, // Make sure to include the category
+        category: originalDiscrepancy.category,
         remarks: originalDiscrepancy.remarks || "",
         docNum: invoice.docNum,
         docDate: new Date(invoice.docDate),
@@ -813,12 +813,27 @@ class AnalysisController {
       resolvedMatches.push(...newMatches);
       matchesMap.set(resolvedCategory, resolvedMatches);
 
+      // Update SAP discrepancies
+      analysis.sapDiscrepancies = analysis.sapDiscrepancies.filter(
+        (sapInv) =>
+          !matchedInvoices.some((matched) => matched._id === sapInv._id)
+      );
+
+      // Update extendedSapDiscrepancies
+      analysis.extendedSapDiscrepancies =
+        analysis.extendedSapDiscrepancies.filter(
+          (sapInv) =>
+            !matchedInvoices.some((matched) => matched._id === sapInv._id)
+        );
+
       // Update analysis document
       analysis.matches = matchesMap;
       analysis.excelDiscrepancies = discrepanciesMap;
 
       analysis.markModified("matches");
       analysis.markModified("excelDiscrepancies");
+      analysis.markModified("sapDiscrepancies");
+      analysis.markModified("extendedSapDiscrepancies");
 
       await analysis.save();
 
@@ -826,6 +841,7 @@ class AnalysisController {
         success: true,
         matches: Array.from(matchesMap.get(resolvedCategory) || []),
         discrepancies: Array.from(discrepanciesMap.get(category) || []),
+        sapDiscrepancies: analysis.sapDiscrepancies,
       });
     } catch (error) {
       console.error("Error resolving discrepancy:", error);
@@ -860,7 +876,7 @@ class AnalysisController {
         .limit(100)
         .lean(); // Add .lean() to get plain objects
 
-      // Transform Map-like objects to regular objects if needed
+      // Transform Map-like objects to regular objects and include references
       const transformedAnalyses = analyses.map((analysis) => ({
         ...analysis,
         matches: analysis.matches
@@ -869,7 +885,14 @@ class AnalysisController {
         excelDiscrepancies: analysis.excelDiscrepancies
           ? Object.fromEntries(Object.entries(analysis.excelDiscrepancies))
           : {},
+        // Explicitly include all references
+        cash_references: analysis.cash_references || [],
+        cheque_references: analysis.cheque_references || [],
+        bank_references: analysis.bank_references || [],
+        transfer_references: analysis.transfer_references || [],
       }));
+
+      console.log("Fetched analyses:", transformedAnalyses); 
 
       res.json(transformedAnalyses);
     } catch (error) {
@@ -1070,40 +1093,70 @@ class AnalysisController {
 
   static async reconcileBank(req, res) {
     try {
-      const { analysisId, categoryReconciled, difference, differenceField } =
-        req.body;
-      console.log(
-        "Reconciling bank for analysis:",
+      const {
         analysisId,
         categoryReconciled,
         difference,
-        differenceField
-      );
+        differenceField,
+        selectedTransactions,
+      } = req.body;
 
       // Get the analysis
       const analysis = await Analysis.findById(analysisId);
+      if (!analysis) {
+        return res.status(404).json({ error: "Analysis not found" });
+      }
 
-      // Update reconciliation status based on category
+      // Create reference objects from selected transactions
+      const referenceObjects = selectedTransactions.map((tx) => ({
+        operationRef: tx.operationRef,
+        amount: tx.amount,
+        date: tx.operationDate,
+        detail: tx.detail1 || "",
+      }));
+
+      // Update reconciliation status and references based on category
       if (categoryReconciled === "cash") {
         analysis.cashReconciled = true;
         analysis.bankCashDifference = difference;
+        analysis.cash_references = referenceObjects; // Set the new references
+        analysis.markModified("cash_references"); // Mark as modified
       } else if (categoryReconciled === "cheque") {
         analysis.chequeReconciled = true;
         analysis.bankChequeDifference = difference;
+        analysis.cheque_references = referenceObjects;
+        analysis.markModified("cheque_references");
       } else if (categoryReconciled === "credit") {
         analysis.bankReconciled = true;
         analysis.bankBankDifference = difference;
+        analysis.bank_references = referenceObjects;
+        analysis.markModified("bank_references");
       } else if (categoryReconciled === "transfer") {
         analysis.transferReconciled = true;
         analysis.bankTransferDifference = difference;
+        analysis.transfer_references = referenceObjects;
+        analysis.markModified("transfer_references");
       }
 
-      await analysis.save();
+      // Save the analysis document
+      const savedAnalysis = await analysis.save();
+
+      // Verify the references were saved by fetching fresh document
+      const verifiedAnalysis = await Analysis.findById(analysisId);
+      const savedReferences =
+        categoryReconciled === "cash"
+          ? verifiedAnalysis.cash_references
+          : categoryReconciled === "cheque"
+          ? verifiedAnalysis.cheque_references
+          : categoryReconciled === "credit"
+          ? verifiedAnalysis.bank_references
+          : verifiedAnalysis.transfer_references;
 
       res.json({
         success: true,
         difference,
         category: categoryReconciled,
+        references: savedReferences, // Return the verified saved references
       });
     } catch (error) {
       console.error("Error reconciling bank:", error.message);
