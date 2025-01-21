@@ -303,6 +303,7 @@ class AnalysisController {
           extendedSapDiscrepancies: existingAnalysis.extendedSapDiscrepancies,
           posAnalysis: existingAnalysis.posAnalysis,
           pos_closed_off: existingAnalysis.pos_closed_off,
+          unmatchedPayments: existingAnalysis.unmatchedPayments,
         });
       }
 
@@ -319,11 +320,6 @@ class AnalysisController {
       }).lean();
 
       console.log("Retrieved SAP Data:", sapInvoices.length, "invoices");
-      const sapPayments = [];
-
-      const flattenedPayments = sapPayments.map(
-        AnalysisController.flattenPaymentData
-      );
 
       // Fetch SAP invoices for extended date range
       const allSapData = [...sapInvoices];
@@ -647,6 +643,106 @@ class AnalysisController {
         ),
       }));
 
+      const isInvoiceMatched = (invoiceNum, invoiceAmount, invoiceName) => {
+        return Object.values(groupedMatches).some((categoryMatches) =>
+          categoryMatches.some((match) => {
+            // First try exact invoice number match if available
+            if (match.docNum && match.docNum === invoiceNum) {
+              return true;
+            }
+
+            // If no exact match, check by amount and customer name
+            const amountDiff = Math.abs((match.sapAmount || 0) - invoiceAmount);
+            const amountTolerance = invoiceAmount * 0.01; // 1% tolerance
+
+            return (
+              amountDiff <= amountTolerance && match.sapCustomer === invoiceName
+            );
+          })
+        );
+      };
+
+      // Helper function to check if an invoice exists in discrepancies
+      const isInvoiceInDiscrepancies = (
+        invoiceNum,
+        invoiceAmount,
+        invoiceName
+      ) => {
+        const checkInvoiceList = (invoiceList) => {
+          return invoiceList.some((disc) => {
+            // First try exact invoice number match
+            if (disc.DocNum === invoiceNum) {
+              return true;
+            }
+
+            // If no exact match, check by amount and customer name
+            const amountDiff = Math.abs((disc.DocTotal || 0) - invoiceAmount);
+            const amountTolerance = invoiceAmount * 0.01; // 1% tolerance
+
+            return (
+              amountDiff <= amountTolerance && disc.CardName === invoiceName
+            );
+          });
+        };
+        checkInvoiceList(sapDiscrepancies) ||
+          checkInvoiceList(extendedSapDiscrepancies);
+      };
+
+      let payments2 = await Payment.find({
+        CreationDate: {
+          $gte: SSD,
+          $lte: EED,
+        },
+      }).lean();
+
+      //remove the payments that are POS
+      payments2 = payments2.filter(
+        (payment) =>
+          payment.CardCode !== "C9999" &&
+          !payment.CardName?.toLowerCase().includes("comptoir") &&
+          payment.U_EPOSNo == null
+      );
+
+      // 2. For each payment, adjust the date by adding one day
+      const paymentsWithAdjustedDates = payments2.map((payment) => ({
+        ...payment,
+        adjustedDate: (() => {
+          const adjustedDate = new Date(payment.DocDate);
+          adjustedDate.setDate(adjustedDate.getDate() + 1);
+          return adjustedDate;
+        })(),
+      }));
+
+      // 3. Get payment links for these payments
+      const paymentLinks2 = await PaymentLink.find({
+        paymentNumber: { $in: payments2.map((p) => p.DocNum) },
+      }).lean();
+
+      // 4. Create map of payment numbers to invoice numbers
+      const paymentToInvoiceMap = {};
+      paymentLinks2.forEach((link) => {
+        paymentToInvoiceMap[link.paymentNumber] = link.invoiceNumber;
+      });
+
+      // 5. Find payments that don't have corresponding invoices
+      let unmatchedPayments = paymentsWithAdjustedDates.filter((payment) => {
+        // Check if we have an invoice number for this payment
+        const hasInvoice = paymentToInvoiceMap.hasOwnProperty(payment.DocNum);
+
+        if (!hasInvoice) {
+          // This payment has no invoice link at all
+          return true;
+        }
+
+        // // If it has an invoice link, check if that invoice is already matched or in discrepancies
+        // const invoiceNum = paymentToInvoiceMap[payment.DocNum];
+        // const alreadyMatched =
+        //   isInvoiceMatched(invoiceNum) || isInvoiceInDiscrepancies(invoiceNum);
+
+        // // Keep if not already matched
+        // return !alreadyMatched;
+      });
+
       // Create new analysis document
       const analysis = new Analysis({
         dateRange: {
@@ -696,6 +792,7 @@ class AnalysisController {
           },
           lastUpdated: new Date(),
         },
+        unmatchedPayments,
       });
       // Initialize maps if empty
       if (!analysis.matches) {
@@ -737,10 +834,272 @@ class AnalysisController {
             )
         ),
         posAnalysis: analysis.posAnalysis,
+        unmatchedPayments: analysis.unmatchedPayments,
       });
     } catch (error) {
       console.error("Analysis error:", error);
       res.status(500).json({ error: "Analysis failed: " + error.message });
+    }
+  }
+  static async resolveUnmatchedPayment(req, res) {
+    try {
+      const { analysisId, paymentId, resolution, matchedTransactions } =
+        req.body;
+
+      console.log("Received resolution data:", req.body);
+
+      const analysis = await Analysis.findById(analysisId);
+      if (!analysis) {
+        return res.status(404).json({ error: "Analysis not found" });
+      }
+
+      // Find the payment to resolve
+      const paymentIndex = analysis.unmatchedPayments.findIndex(
+        (p) => p._id.toString() === paymentId
+      );
+
+      if (paymentIndex === -1) {
+        return res.status(404).json({ error: "Payment not found" });
+      }
+
+      // Get the original payment
+      const originalPayment = analysis.unmatchedPayments[paymentIndex];
+
+      // Update the selected Excel transactions as verified
+      for (const match of matchedTransactions) {
+        if (match.originalEntry) {
+          const sale = await Sale.findOne({ date: match.date });
+          if (sale) {
+            if (match.category.startsWith("POS")) {
+              // Handle POS categories
+              const posCategory = {
+                "POS CB": "Caisse CB",
+                "POS Espèces": "Caisse Espèces",
+                "POS Chèques": "Caisse chèques",
+              }[match.category];
+
+              const entryIndex = sale.POS[posCategory].findIndex(
+                (e) => e.client === match.client && e.amount === match.amount
+              );
+              if (entryIndex !== -1) {
+                sale.POS[posCategory][entryIndex].verified = true;
+              }
+            } else {
+              // Handle regular categories
+              const entryIndex = sale[match.category].findIndex(
+                (e) =>
+                  e.client === match.client &&
+                  (e.amount === match.amount || e.bank === match.amount)
+              );
+              if (entryIndex !== -1) {
+                sale[match.category][entryIndex].verified = true;
+              }
+            }
+            await sale.save();
+          }
+        }
+      }
+
+      // Update the payment with resolution info
+      analysis.unmatchedPayments[paymentIndex] = {
+        DocEntry: originalPayment.DocEntry,
+        DocNum: originalPayment.DocNum,
+        DocDate: originalPayment.DocDate,
+        CardCode: originalPayment.CardCode,
+        CardName: originalPayment.CardName,
+        DocTotal: originalPayment.DocTotal,
+        Remarks: originalPayment.Remarks,
+        source: "incoming",
+        paymentNumber: originalPayment.paymentNumber,
+        paymentDate: originalPayment.paymentDate,
+        resolved: true,
+        resolution,
+        resolvedTimestamp: new Date(),
+        matchedTransactions: [
+          // Include the payment details
+          originalPayment._doc,
+          // Include the Excel matches
+          ...matchedTransactions.map((tx) => ({
+            date: tx.date,
+            client: tx.client,
+            amount: Number(tx.amount),
+            category: tx.category,
+            type: "excel",
+            remarks: tx.remarks || "",
+          })),
+        ],
+      };
+
+      // Create new matches
+      const newMatches = matchedTransactions.map((tx) => ({
+        date: new Date(tx.date),
+        excelClient: tx.client,
+        sapCustomer: originalPayment.CardName,
+        excelAmount: Number(tx.amount),
+        sapAmount: Number(originalPayment.DocTotal),
+        category: tx.category,
+        remarks: tx.remarks || "",
+        docNum: originalPayment.DocNum,
+        docDate: originalPayment.DocDate,
+        isResolved: true,
+        resolution,
+        type: "payment_to_excel",
+      }));
+
+      // Update matches Map
+      let matchesMap = analysis.matches;
+      if (!(matchesMap instanceof Map)) {
+        matchesMap = new Map(Object.entries(analysis.matches));
+      }
+
+      const resolvedCategory = "Payment Resolved Matches";
+      const resolvedMatches = matchesMap.get(resolvedCategory) || [];
+      resolvedMatches.push(...newMatches);
+      matchesMap.set(resolvedCategory, resolvedMatches);
+
+      // Update analysis document
+      analysis.matches = matchesMap;
+      analysis.markModified("matches");
+      analysis.markModified("unmatchedPayments");
+
+     
+
+      await analysis.save();
+
+      res.json({
+        success: true,
+        matches: Array.from(matchesMap.get(resolvedCategory) || []),
+        unmatchedPayments: analysis.unmatchedPayments,
+      });
+    } catch (error) {
+      console.error("Error resolving unmatched payment:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  // Add method to find potential matches for unmatched payments
+  static async findPotentialExcelMatchesForPayment(req, res) {
+    try {
+      const { analysisId, paymentId } = req.body;
+
+      const analysis = await Analysis.findById(analysisId);
+      if (!analysis) {
+        return res.status(404).json({ error: "Analysis not found" });
+      }
+
+      // Find the payment
+      const payment = analysis.unmatchedPayments.find(
+        (p) => p._id.toString() === paymentId
+      );
+
+      if (!payment) {
+        return res.status(404).json({ error: "Payment not found" });
+      }
+
+      // Calculate date range (±20 days)
+      const paymentDate = new Date(payment.DocDate);
+      const startDate = new Date(paymentDate);
+      const endDate = new Date(paymentDate);
+      startDate.setDate(startDate.getDate() - 20);
+      endDate.setDate(endDate.getDate() + 20);
+
+      // Fetch sales data within date range
+      const salesData = await Sale.find({
+        date: {
+          $gte: startDate,
+          $lte: endDate,
+        },
+      }).sort({ date: 1 });
+
+      const potentialMatches = [];
+
+      // Helper function to process entries
+      const processEntry = (entry, category, date) => {
+        if (
+          entry.client?.toLowerCase() === "total" ||
+          entry.client?.toLowerCase() === "client" ||
+          entry.client === "TOTAL ESPECES" ||
+          entry.client === "TOTAL CHEQUES" ||
+          entry.client === "TOTAL CB Internet & Phone"
+        ) {
+          return;
+        }
+
+        const amount = entry.bank || entry.amount || 0;
+        const amountDiff = Math.abs(amount - payment.DocTotal);
+        const amountTolerance = payment.DocTotal * 0.3;
+
+        if (amountDiff <= amountTolerance) {
+          const similarity = stringSimilarity.compareTwoStrings(
+            AnalysisController.normalizeCompanyName(entry.client),
+            AnalysisController.normalizeCompanyName(payment.CardName)
+          );
+
+          potentialMatches.push({
+            date,
+            client: entry.client,
+            amount,
+            category,
+            remarks: entry.remarks || "",
+            similarity,
+            originalEntry: entry,
+          });
+        }
+      };
+
+      // Process sales data
+      salesData.forEach((dayData) => {
+        const categories = [
+          "Paiements Chèques",
+          "Paiements Espèces",
+          "Paiements CB Site",
+          "Paiements CB Téléphone",
+          "Virements",
+          "Livraisons non payées",
+        ];
+
+        categories.forEach((category) => {
+          if (Array.isArray(dayData[category])) {
+            dayData[category].forEach((entry) =>
+              processEntry(entry, category, dayData.date)
+            );
+          }
+        });
+
+        // Process POS categories
+        if (dayData.POS) {
+          const posCategories = {
+            "Caisse CB": "POS CB",
+            "Caisse Espèces": "POS Espèces",
+            "Caisse chèques": "POS Chèques",
+          };
+
+          Object.entries(posCategories).forEach(([key, category]) => {
+            if (Array.isArray(dayData.POS[key])) {
+              dayData.POS[key].forEach((entry) =>
+                processEntry(entry, category, dayData.date)
+              );
+            }
+          });
+        }
+      });
+
+      // Sort matches by similarity and amount difference
+      const sortedMatches = potentialMatches
+        .sort((a, b) => {
+          if (Math.abs(b.similarity - a.similarity) < 0.6) {
+            const aDiff = Math.abs(a.amount - payment.DocTotal);
+            const bDiff = Math.abs(b.amount - payment.DocTotal);
+            return aDiff - bDiff;
+          }
+          return b.similarity - a.similarity;
+        })
+        .slice(0, 5);
+
+      res.json({ potentialMatches: sortedMatches });
+    } catch (error) {
+      console.error("Error finding potential matches:", error);
+      res.status(500).json({ error: error.message });
     }
   }
 
@@ -892,7 +1251,7 @@ class AnalysisController {
         transfer_references: analysis.transfer_references || [],
       }));
 
-      console.log("Fetched analyses:", transformedAnalyses); 
+      console.log("Fetched analyses:", transformedAnalyses);
 
       res.json(transformedAnalyses);
     } catch (error) {

@@ -20,6 +20,7 @@ const ReturnsRoutes = require("./routes/returns.routes");
 const PaymentLinksRoutes = require("./routes/paymentLinks.routes");
 const SalesOrderRoutes = require("./routes/salesOrder.routes");
 const CustomerRoutes = require("./routes/customer.routes");
+const ExpenseRoutes = require("./routes/expense.routes");
 dotenv.config();
 
 const app = express();
@@ -77,6 +78,7 @@ app.use("/api/tags", TagRoutes);
 app.use("/api/payment-links", PaymentLinksRoutes);
 app.use("/api/customers", CustomerRoutes);
 app.use("/api/sales-orders", SalesOrderRoutes);
+app.use("/api/expenses", ExpenseRoutes);
 app.post("/api/verify", (req, res) => {
   console.log(req.body);
   res.send("Received");

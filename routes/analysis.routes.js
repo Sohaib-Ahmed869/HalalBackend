@@ -24,5 +24,13 @@ router.post("/reconcile-bank", AnalysisController.reconcileBank);
 router.post("/closeOff", AnalysisController.closeOffWithANote);
 router.post("/pos-closeOff", AnalysisController.POScloseOffWithANote);
 router.put("/addNote", AnalysisController.addNoteToAnalysis);
+router.post(
+  "/resolve-unmatched-payment",
+  AnalysisController.resolveUnmatchedPayment
+);
+router.post(
+  "/find-potential-excel-matches-for-payment",
+  AnalysisController.findPotentialExcelMatchesForPayment
+);
 
 module.exports = router;

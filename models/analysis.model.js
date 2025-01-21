@@ -325,6 +325,45 @@ const SimplifiedBankReconciliationSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const matchedTransactionSchema = new mongoose.Schema(
+  {
+    date: Date,
+    client: String,
+    amount: Number,
+    type: String,
+    category: String,
+    remarks: String,
+  },
+  { _id: false }
+);
+
+const UnmatchedPaymentSchema = new mongoose.Schema({
+  // Payment fields
+  DocEntry: Number,
+  DocNum: Number,
+  DocDate: Date,
+
+  CardCode: String,
+  CardName: String,
+  DocTotal: Number,
+  CashSum: Number,
+  TransferSum: Number,
+  CheckSum: Number,
+  CreditSum: Number,
+  Remarks: String,
+  paymentNumber: String,
+  paymentDate: Date,
+
+  // Resolution fields
+  resolved: {
+    type: Boolean,
+    default: false,
+  },
+  resolution: String,
+  resolvedTimestamp: Date,
+  matchedTransactions: [matchedTransactionSchema],
+});
+
 const AnalysisSchema = new mongoose.Schema({
   dateRange: {
     start: {
@@ -446,6 +485,10 @@ const AnalysisSchema = new mongoose.Schema({
   },
   transfer_references: {
     type: Array,
+  },
+  unmatchedPayments: {
+    type: [UnmatchedPaymentSchema],
+    default: [],
   },
 });
 
