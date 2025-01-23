@@ -509,7 +509,6 @@ const syncNewOrders = async (req, res) => {
     const cookies = await loginToSAP();
     console.log(cookies);
 
-
     let nextLink = `${process.env.BASE_URL}/Orders?$filter=CreationDate ge '${formattedToday}' and CreationDate lt '${formattedTomorrow}'&$orderby=CreationDate`;
 
     while (nextLink) {
@@ -617,6 +616,95 @@ const syncNewOrders = async (req, res) => {
   }
 };
 
+const checkOrderStatus = async (req, res) => {
+  try {
+    // Get all open sales orders from MongoDB
+    const openOrders = await SalesOrder.find(
+      {
+        DocumentStatus: "bost_Open",
+      },
+      { DocNum: 1 }
+    );
+
+    console.log(`Found ${openOrders.length} open orders to check`);
+
+    // Login to SAP to get session cookie
+    const cookies = await loginToSAP();
+
+    const results = {
+      total: openOrders.length,
+      updated: 0,
+      failed: 0,
+      details: [],
+    };
+
+    // Check each order's status in SAP
+    for (const order of openOrders) {
+      try {
+        // Get order details from SAP
+        const response = await axios.get(
+          `${process.env.BASE_URL}/Orders?$filter=DocNum eq ${order.DocNum}`,
+          {
+            headers: {
+              Cookie: cookies,
+            },
+          }
+        );
+
+        const sapStatus = response.data.DocumentStatus;
+
+        // If SAP status is different from MongoDB status
+        if (sapStatus !== "bost_Open") {
+          // Update order in MongoDB
+          await SalesOrder.updateOne(
+            { DocNum: order.DocNum },
+            {
+              $set: {
+                DocumentStatus: sapStatus,
+                lastUpdated: new Date(),
+              },
+            }
+          );
+
+          results.updated++;
+          results.details.push({
+            docNum: order.DocNum,
+            oldStatus: "bost_Open",
+            newStatus: sapStatus,
+            success: true,
+          });
+        }
+      } catch (error) {
+        console.error(`Failed to check order ${order.DocNum}:`, error.message);
+        results.failed++;
+        results.details.push({
+          docNum: order.DocNum,
+          error: error.message,
+          success: false,
+        });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Status check completed",
+      results: {
+        totalChecked: results.total,
+        ordersUpdated: results.updated,
+        checksFailed: results.failed,
+        details: results.details,
+      },
+    });
+  } catch (error) {
+    console.error("Status check failed:", error);
+    res.status(500).json({
+      success: false,
+      error: "Status check failed",
+      details: error.message,
+    });
+  }
+};
+
 module.exports = {
   getAllSalesOrders,
   getSalesOrdersByDateRange,
@@ -624,4 +712,5 @@ module.exports = {
   generatePaymentLink,
   getUpdateOnPaymentLink,
   syncNewOrders,
+  checkOrderStatus,
 };
