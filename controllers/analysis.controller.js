@@ -319,13 +319,29 @@ class AnalysisController {
         CreationDate: { $gte: extendedStartDate, $lte: extendedEndDate },
       }).lean();
 
+      //get payments for the selected date range
+      const paymentsForMatching = await Payment.find({
+        CreationDate: {
+          $gte: SSD,
+          $lte: EED,
+        },
+      }).lean();
+
+      //remove the payments that are POS
+      const paymentsWithoutPOS = paymentsForMatching.filter(
+        (payment) =>
+          payment.CardCode !== "C9999" &&
+          !payment.CardName?.toLowerCase().includes("comptoir") &&
+          payment.U_EPOSNo == null
+      );
+
       console.log("Retrieved SAP Data:", sapInvoices.length, "invoices");
 
       // Fetch SAP invoices for extended date range
       const allSapData = [...sapInvoices];
 
       // Filter SAP data for selected date range
-      const selectedRangeSapData = allSapData.filter((invoice) => {
+      let selectedRangeSapData = allSapData.filter((invoice) => {
         const invoiceDate = new Date(invoice.CreationDate);
         return invoiceDate >= SSD && invoiceDate <= EED;
       });
@@ -348,7 +364,9 @@ class AnalysisController {
       const matches = [];
       const excelDiscrepancies = [];
       const sapDiscrepancies = [...selectedRangeSapData]; // Use selected range for discrepancies
-      const extendedSapDiscrepancies = [...allSapData]; // Keep full range for matching
+      const extendedSapDiscrepancies = [...allSapData, ...paymentsWithoutPOS];
+
+      const allData = [...allSapData, ...paymentsWithoutPOS];
 
       // Process regular transactions (excluding POS)
       for (const excelEntry of flattenedExcelData) {
@@ -358,7 +376,7 @@ class AnalysisController {
         let bestScore = 0;
         let bestIndex = -1;
 
-        allSapData.forEach((sapEntry, index) => {
+        allData.forEach((sapEntry, index) => {
           // Skip POS entries in SAP
           if (
             sapEntry.CardCode === "C9999" ||
@@ -373,12 +391,12 @@ class AnalysisController {
           const dateDiff =
             Math.abs(excelDate - sapDate) / (1000 * 60 * 60 * 24);
 
-          if (dateDiff <= 50) {
+          if (dateDiff === 0) {
             // Extended matching window
             const amountDiff = Math.abs(excelEntry.amount - sapEntry.DocTotal);
-            const amountTolerance = sapEntry.DocTotal * 0.01;
+            // const amountTolerance = sapEntry.DocTotal * 0.01;
 
-            if (amountDiff <= amountTolerance) {
+            if (amountDiff == 0) {
               // Normalize both names before comparison
               const normalizedExcelName =
                 AnalysisController.normalizeCompanyName(excelEntry.client);
@@ -414,16 +432,14 @@ class AnalysisController {
                 normalizedSapName
               );
 
-              if (similarity > bestScore) {
-                bestScore = similarity;
-                bestMatch = sapEntry;
-                bestIndex = index;
-              }
+              bestScore = similarity;
+              bestMatch = sapEntry;
+              bestIndex = index;
             }
           }
         });
 
-        if (bestMatch && bestScore > 0.01) {
+        if (bestMatch) {
           matches.push({
             date: excelEntry.date,
             excelClient: excelEntry.client,
@@ -642,51 +658,6 @@ class AnalysisController {
           flattenedExcelData
         ),
       }));
-
-      const isInvoiceMatched = (invoiceNum, invoiceAmount, invoiceName) => {
-        return Object.values(groupedMatches).some((categoryMatches) =>
-          categoryMatches.some((match) => {
-            // First try exact invoice number match if available
-            if (match.docNum && match.docNum === invoiceNum) {
-              return true;
-            }
-
-            // If no exact match, check by amount and customer name
-            const amountDiff = Math.abs((match.sapAmount || 0) - invoiceAmount);
-            const amountTolerance = invoiceAmount * 0.01; // 1% tolerance
-
-            return (
-              amountDiff <= amountTolerance && match.sapCustomer === invoiceName
-            );
-          })
-        );
-      };
-
-      // Helper function to check if an invoice exists in discrepancies
-      const isInvoiceInDiscrepancies = (
-        invoiceNum,
-        invoiceAmount,
-        invoiceName
-      ) => {
-        const checkInvoiceList = (invoiceList) => {
-          return invoiceList.some((disc) => {
-            // First try exact invoice number match
-            if (disc.DocNum === invoiceNum) {
-              return true;
-            }
-
-            // If no exact match, check by amount and customer name
-            const amountDiff = Math.abs((disc.DocTotal || 0) - invoiceAmount);
-            const amountTolerance = invoiceAmount * 0.01; // 1% tolerance
-
-            return (
-              amountDiff <= amountTolerance && disc.CardName === invoiceName
-            );
-          });
-        };
-        checkInvoiceList(sapDiscrepancies) ||
-          checkInvoiceList(extendedSapDiscrepancies);
-      };
 
       let payments2 = await Payment.find({
         CreationDate: {
@@ -961,8 +932,6 @@ class AnalysisController {
       analysis.matches = matchesMap;
       analysis.markModified("matches");
       analysis.markModified("unmatchedPayments");
-
-     
 
       await analysis.save();
 

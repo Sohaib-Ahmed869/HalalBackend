@@ -255,7 +255,7 @@ const generatePaymentLink = async (req, res) => {
       shopperEmail: email,
       lineItems: salesOrder.DocumentLines.map((line) => ({
         quantity: line.Quantity,
-        amountIncludingTax: Math.round(line.LineTotal * 100),
+        amountIncludingTax: Math.round(line.LineTotal),
         description: line.ItemDescription,
       })),
     };
