@@ -24,7 +24,7 @@ const getAllSalesOrders = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const query = {
-      DocumentStatus: "bost_Open", // Filter for open status only
+      DocumentStatus: "bost_Open",
     };
 
     const [salesOrders, total] = await Promise.all([
@@ -76,7 +76,7 @@ const getSalesOrdersByDateRange = async (req, res) => {
         $gte: start,
         $lte: end,
       },
-      DocumentStatus: "bost_Open", // Filter for open status only
+      DocumentStatus: "bost_Open",
     };
 
     const salesOrdersWithCustomer = await SalesOrder.aggregate([
@@ -651,7 +651,7 @@ const checkOrderStatus = async (req, res) => {
           }
         );
 
-        const sapStatus = response.data.DocumentStatus;
+        const sapStatus = response.data.value[0].DocumentStatus;
 
         // If SAP status is different from MongoDB status
         if (sapStatus !== "bost_Open") {
