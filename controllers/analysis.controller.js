@@ -366,7 +366,7 @@ class AnalysisController {
       const sapDiscrepancies = [...selectedRangeSapData]; // Use selected range for discrepancies
       const extendedSapDiscrepancies = [...allSapData, ...paymentsWithoutPOS];
 
-      const allData = [...allSapData, ...paymentsWithoutPOS];
+      const allData = [...allSapData];
 
       // Process regular transactions (excluding POS)
       for (const excelEntry of flattenedExcelData) {
@@ -465,13 +465,84 @@ class AnalysisController {
             extendedSapDiscrepancies.splice(extendedIndex, 1);
           }
         } else {
-          excelDiscrepancies.push({
-            date: excelEntry.date,
-            client: excelEntry.client,
-            amount: excelEntry.amount,
-            category: excelEntry.category,
-            remarks: excelEntry.remarks,
+          // Try matching with payments
+          let bestPaymentMatch = null;
+          let bestPaymentScore = 0;
+          let bestPaymentIndex = -1;
+
+          paymentsWithoutPOS.forEach((payment, index) => {
+            const excelDate = new Date(excelEntry.date);
+            const paymentDate = new Date(payment.CreationDate);
+            const dateDiff =
+              Math.abs(excelDate - paymentDate) / (1000 * 60 * 60 * 24);
+
+            if (dateDiff === 0) {
+              const amountDiff = Math.abs(excelEntry.amount - payment.DocTotal);
+              if (amountDiff == 0) {
+                const normalizedExcelName =
+                  AnalysisController.normalizeCompanyName(excelEntry.client);
+                const normalizedPaymentName =
+                  AnalysisController.normalizeCompanyName(payment.CardName);
+
+                if (normalizedExcelName === normalizedPaymentName) {
+                  bestPaymentScore = 1;
+                  bestPaymentMatch = payment;
+                  bestPaymentIndex = index;
+                  return;
+                }
+
+                if (
+                  normalizedPaymentName.includes(normalizedExcelName) ||
+                  normalizedExcelName.includes(normalizedPaymentName)
+                ) {
+                  const containsScore = 0.9;
+                  if (containsScore > bestPaymentScore) {
+                    bestPaymentScore = containsScore;
+                    bestPaymentMatch = payment;
+                    bestPaymentIndex = index;
+                    return;
+                  }
+                }
+
+                const similarity = stringSimilarity.compareTwoStrings(
+                  normalizedExcelName,
+                  normalizedPaymentName
+                );
+
+                bestPaymentScore = similarity;
+                bestPaymentMatch = payment;
+                bestPaymentIndex = index;
+              }
+            }
           });
+
+          if (bestPaymentMatch) {
+            matches.push({
+              date: excelEntry.date,
+              excelClient: excelEntry.client,
+              sapCustomer: bestPaymentMatch.CardName,
+              excelAmount: excelEntry.amount,
+              sapAmount: bestPaymentMatch.DocTotal,
+              category: excelEntry.category,
+              similarity: bestPaymentScore,
+              remarks: excelEntry.remarks,
+            });
+
+            const paymentIndex = paymentsWithoutPOS.findIndex(
+              (payment) => payment.DocNum === bestPaymentMatch.DocNum
+            );
+            if (paymentIndex !== -1) {
+              paymentsWithoutPOS.splice(paymentIndex, 1);
+            }
+          } else {
+            excelDiscrepancies.push({
+              date: excelEntry.date,
+              client: excelEntry.client,
+              amount: excelEntry.amount,
+              category: excelEntry.category,
+              remarks: excelEntry.remarks,
+            });
+          }
         }
       }
 
@@ -704,14 +775,6 @@ class AnalysisController {
           // This payment has no invoice link at all
           return true;
         }
-
-        // // If it has an invoice link, check if that invoice is already matched or in discrepancies
-        // const invoiceNum = paymentToInvoiceMap[payment.DocNum];
-        // const alreadyMatched =
-        //   isInvoiceMatched(invoiceNum) || isInvoiceInDiscrepancies(invoiceNum);
-
-        // // Keep if not already matched
-        // return !alreadyMatched;
       });
 
       // Create new analysis document
