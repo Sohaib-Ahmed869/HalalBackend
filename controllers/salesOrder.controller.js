@@ -133,9 +133,6 @@ const getSalesOrderWithCustomer = async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 10;
     const skip = (page - 1) * limit;
 
-    const query = {
-      DocumentStatus: "bost_Open", // Filter for open status only
-    };
     const salesOrdersWithCustomer = await SalesOrder.aggregate([
       {
         $match: {
@@ -164,13 +161,18 @@ const getSalesOrderWithCustomer = async (req, res) => {
           Email: { $ifNull: ["$customer.Email", null] },
         },
       },
-      { $skip: skip },
-      { $limit: limit },
     ]);
 
     const total = await SalesOrder.countDocuments({
       DocumentStatus: "bost_Open",
     });
+
+    //console log all the order numbers
+    salesOrdersWithCustomer.forEach((order) => {
+      console.log(order.DocNum);
+    });
+
+    console.log(total);
 
     res.status(200).json({
       success: true,
