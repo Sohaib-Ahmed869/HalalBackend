@@ -254,10 +254,22 @@ const generatePaymentLink = async (req, res) => {
       countryCode: "FR",
       merchantAccount: process.env.ADYEN_MERCHANT_ACCOUNT,
       shopperReference: salesOrder.CardCode,
+      company: {
+        name: salesOrder.CardName,
+      },
       shopperEmail: email,
+
       lineItems: salesOrder.DocumentLines.map((line) => ({
+        id: line.LineNum,
         quantity: line.Quantity,
-        amountIncludingTax: line.LineTotal * 100, // Convert to cents
+        amountIncludingTax: Math.round(line.PriceAfterVAT * 100),
+        amountExcludingTax: Math.round(line.Price * 100),
+        //convert to integer
+        taxAmount: Math.round((line.PriceAfterVAT - line.Price) * 100),
+        taxPercentage: Math.round(
+          (line.PriceAfterVAT / line.Price - 1) * 10000
+        ),
+
         description: line.ItemDescription,
       })),
     };
