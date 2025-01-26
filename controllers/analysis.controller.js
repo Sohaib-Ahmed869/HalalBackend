@@ -337,9 +337,9 @@ class AnalysisController {
 
       //add 5 days to the end date and -5 days to the start date
       const extendedStartDate2 = new Date(SSD);
-      extendedStartDate2.setDate(extendedStartDate2.getDate() - 5);
+      extendedStartDate2.setDate(extendedStartDate2.getDate() - 25);
       const extendedEndDate2 = new Date(EED);
-      extendedEndDate2.setDate(extendedEndDate2.getDate() + 5);
+      extendedEndDate2.setDate(extendedEndDate2.getDate() + 25);
       const paymentsForMatching2 = await Payment.find({
         CreationDate: {
           $gte: extendedStartDate2,
@@ -405,7 +405,6 @@ class AnalysisController {
           ) {
             return;
           }
-          
 
           const excelDate = new Date(excelEntry.date);
           const sapDate = new Date(sapEntry.CreationDate);
