@@ -632,50 +632,41 @@ const syncNewOrders = async (req, res) => {
 
 const checkOrderStatus = async (req, res) => {
   try {
-    // Get all open sales orders from MongoDB
-    const openOrders = await SalesOrder.find(
-      {
-        DocumentStatus: "bost_Open",
-      },
-      { DocNum: 1 }
-    );
-
+    const openOrders = await SalesOrder.find({ DocumentStatus: "bost_Open" });
     console.log(`Found ${openOrders.length} open orders to check`);
 
-    // Login to SAP to get session cookie
     const cookies = await loginToSAP();
 
     const results = {
       total: openOrders.length,
       updated: 0,
+      unchanged: 0,
       failed: 0,
       details: [],
     };
 
-    // Check each order's status in SAP
     for (const order of openOrders) {
       try {
-        // Get order details from SAP
         const response = await axios.get(
           `${process.env.BASE_URL}/Orders?$filter=DocNum eq ${order.DocNum}`,
           {
-            headers: {
-              Cookie: cookies,
-            },
+            headers: { Cookie: cookies },
           }
         );
 
-        const sapStatus = response.data.value[0].DocumentStatus;
+        const sapOrder = response.data.value[0];
 
-        // If SAP status is different from MongoDB status
-        if (sapStatus !== "bost_Open") {
-          // Update order in MongoDB
+        const changes = getChangedFields(order, sapOrder);
+        const hasChanges = Object.keys(changes).length > 0;
+
+        if (hasChanges) {
           await SalesOrder.updateOne(
             { DocNum: order.DocNum },
             {
               $set: {
-                DocumentStatus: sapStatus,
+                ...sapOrder,
                 lastUpdated: new Date(),
+                syncedAt: new Date(),
               },
             }
           );
@@ -683,10 +674,11 @@ const checkOrderStatus = async (req, res) => {
           results.updated++;
           results.details.push({
             docNum: order.DocNum,
-            oldStatus: "bost_Open",
-            newStatus: sapStatus,
+            changes,
             success: true,
           });
+        } else {
+          results.unchanged++;
         }
       } catch (error) {
         console.error(`Failed to check order ${order.DocNum}:`, error.message);
@@ -701,22 +693,204 @@ const checkOrderStatus = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Status check completed",
+      message: "Order sync completed",
       results: {
         totalChecked: results.total,
         ordersUpdated: results.updated,
-        checksFailed: results.failed,
+        ordersUnchanged: results.unchanged,
+        syncFailed: results.failed,
         details: results.details,
       },
     });
   } catch (error) {
-    console.error("Status check failed:", error);
+    console.error("Order sync failed:", error);
     res.status(500).json({
       success: false,
-      error: "Status check failed",
+      error: "Order sync failed",
       details: error.message,
     });
   }
+};
+
+const getChangedFields = (mongoOrder, sapOrder) => {
+  const changes = {};
+  const fieldsToCompare = [
+    // Document Header Fields
+    "DocEntry",
+    "DocNum",
+    "DocType",
+    "DocumentStatus",
+    "Cancelled",
+    "DocDate",
+    "DocDueDate",
+    "CardCode",
+    "CardName",
+    "NumAtCard",
+    "DocTotal",
+    "VatSum",
+    "DiscountPercent",
+    "Comments",
+    "Series",
+    "DocCurrency",
+    "DocRate",
+    "Reference1",
+    "Reference2",
+    "CreationDate",
+    "UpdateDate",
+    "SalesPersonCode",
+    "TransportationCode",
+    "Confirmed",
+    "ImportFileNum",
+    "PaymentGroupCode",
+    "TaxDate",
+    "PickStatus",
+    "DocumentLines",
+    "ShipToCode",
+    "Address",
+    "Address2",
+    "OrderPriority",
+    "CancelDate",
+    "RequiredDate",
+    "ContactPersonCode",
+    "TotalDiscount",
+    "DownPaymentAmount",
+    "DownPaymentPercentage",
+    "StartDeliveryDate",
+    "EndDeliveryDate",
+    "OrderDate",
+    "ExtraMonth",
+    "ExtraMonth",
+    "CashDiscountDateOffset",
+    "StartDeliveryTime",
+    "EndDeliveryTime",
+    "ElectronicProtocols",
+    "DocumentsOwner",
+    "FolioNumber",
+    "DocumentSubType",
+    "BaseAmount",
+    "VatPercent",
+    "ServiceGrossProfitPercent",
+    "OpeningRemarks",
+    "ClosingRemarks",
+    "RoundingDiffAmount",
+    "Indicator",
+    "PaymentReference",
+    "FederalTaxID",
+    "GroupNumber",
+    "Project",
+    "PaymentMethod",
+    "PaymentBlock",
+    "PaymentBlockEntry",
+    "CentralBankIndicator",
+    "MaximumCashDiscount",
+    "Reserve",
+    "ExemptionValidityDateFrom",
+    "ExemptionValidityDateTo",
+    "WareHouseUpdateType",
+    "Rounding",
+    "ExternalCorrectedDocNum",
+    "InternalCorrectedDocNum",
+    "NextCorrectingDocument",
+    "DeferredTax",
+    "TaxExemptionLetterNum",
+    "WTApplied",
+    "WTAppliedSC",
+    "BillOfExchangeReserved",
+    "AgentCode",
+    "WTAppliedFC",
+    "WTAppliedSys",
+    "Period",
+    "PeriodIndicator",
+    "PayToCode",
+    "ManualNumber",
+    "UseShpdGoodsAct",
+    "IsPayToBank",
+    "PayToBankCountry",
+    "PayToBankCode",
+    "PayToBankAccountNo",
+    "PayToBankBranch",
+    "BPL_IDAssignedToInvoice",
+    "DownPayment",
+    "ReserveInvoice",
+    "LanguageCode",
+    "TrackingNumber",
+    "PickRemark",
+    "ClosingDate",
+    "SequenceCode",
+    "SequenceSerial",
+    "SeriesString",
+    "SubSeriesString",
+    "SequenceModel",
+    "UseCorrectionVATGroup",
+    "TotalDiscount",
+    "DownPaymentAmount",
+    "DownPaymentPercentage",
+    "DownPaymentType",
+    "DownPaymentAmountSC",
+    "DownPaymentAmountFC",
+    "VatPercent",
+    "ServiceGrossProfitPercent",
+    "OpeningRemarks",
+    "ClosingRemarks",
+    "RoundingDiffAmount",
+    "RoundingDiffAmountFC",
+    "RoundingDiffAmountSC",
+    "Cancelled",
+    "SignatureInputMessage",
+    "SignatureDigest",
+    "CertificationNumber",
+    "PrivateKeyVersion",
+    "ControlAccount",
+    "InsuranceOperation347",
+    "ArchiveNonremovableSalesQuotation",
+    "GTSChecker",
+    "GTSPayee",
+    "ExtraMonth",
+    "ExtraDays",
+    "CashDiscountDateOffset",
+    "StartDeliveryDate",
+    "StartDeliveryTime",
+    "EndDeliveryDate",
+    "EndDeliveryTime",
+    "VehiclePlate",
+    "ATDocumentType",
+    "ElecCommStatus",
+    "ElecCommMessage",
+    "ReuseDocumentNum",
+    "ReuseNotaFiscalNum",
+    "PrintSEPADirect",
+    "FiscalDocNum",
+    "POSDailySummaryNo",
+    "POSReceiptNo",
+    "PointOfIssueCode",
+    "Letter",
+    "FolioNumberFrom",
+    "FolioNumberTo",
+    "InterimType",
+    "RelatedType",
+    "RelatedEntry",
+    "DocumentTaxID",
+    "DateOfReportingControlStatementVAT",
+    "ClosingOption",
+    "SpecifiedClosingDate",
+    "OpenForLandedCosts",
+    "AuthorizationStatus",
+    "BPLID",
+    "BPLName",
+    "VATRegNum",
+    // Document Lines
+    "DocumentLines",
+  ];
+
+  for (const field of fieldsToCompare) {
+    if (JSON.stringify(mongoOrder[field]) !== JSON.stringify(sapOrder[field])) {
+      changes[field] = {
+        old: mongoOrder[field],
+        new: sapOrder[field],
+      };
+    }
+  }
+  return changes;
 };
 
 module.exports = {

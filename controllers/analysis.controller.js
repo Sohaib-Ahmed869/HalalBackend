@@ -335,6 +335,26 @@ class AnalysisController {
           payment.U_EPOSNo == null
       );
 
+      //add 5 days to the end date and -5 days to the start date
+      const extendedStartDate2 = new Date(SSD);
+      extendedStartDate2.setDate(extendedStartDate2.getDate() - 5);
+      const extendedEndDate2 = new Date(EED);
+      extendedEndDate2.setDate(extendedEndDate2.getDate() + 5);
+      const paymentsForMatching2 = await Payment.find({
+        CreationDate: {
+          $gte: extendedStartDate2,
+          $lte: extendedEndDate2,
+        },
+      }).lean();
+
+      //remove the payments that are POS
+      const paymentsWithoutPOS2 = paymentsForMatching2.filter(
+        (payment) =>
+          payment.CardCode !== "C9999" &&
+          !payment.CardName?.toLowerCase().includes("comptoir") &&
+          payment.U_EPOSNo == null
+      );
+
       console.log("Retrieved SAP Data:", sapInvoices.length, "invoices");
 
       // Fetch SAP invoices for extended date range
@@ -361,10 +381,11 @@ class AnalysisController {
         flattenedExcelData.push(...flattened);
       });
 
+      
       const matches = [];
       const excelDiscrepancies = [];
       const sapDiscrepancies = [...selectedRangeSapData]; // Use selected range for discrepancies
-      const extendedSapDiscrepancies = [...allSapData, ...paymentsWithoutPOS];
+      const extendedSapDiscrepancies = [...allSapData, ...paymentsWithoutPOS2]; // Use all data for extended discrepancies
 
       const allData = [...allSapData];
 
@@ -2697,6 +2718,24 @@ class AnalysisController {
       res.json({ success: true, notes: analysis.notes });
     } catch (error) {
       console.error("Error adding a note:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async getAnalysisNotDoneDates(req, res) {
+    try {
+      const analyses = await Analysis.find().lean();
+      const analysisDates = analyses.map((a) => a.dateRange.start);
+      const sales = await Sale.find().lean();
+      const saleDates = sales.map((s) => s.date);
+
+      const missingDates = saleDates.filter(
+        (d) => !analysisDates.includes(d.toISOString())
+      );
+
+      res.json({ missingDates });
+    } catch (error) {
+      console.error("Error getting missing dates:", error);
       res.status(500).json({ error: error.message });
     }
   }

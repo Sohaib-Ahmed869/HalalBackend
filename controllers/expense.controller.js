@@ -12,12 +12,16 @@ class ExpenseController {
         return res.status(404).json({ error: "Analysis not found" });
       }
 
+      //get the analysis start date
+      const startDate = analysis.dateRange.start;
+
       // Create new expense
       const expense = new Expense({
         name,
         amount,
         tag,
         analysisId,
+        createdAt: new Date(startDate), // Set expense date to analysis start date
       });
 
       await expense.save();

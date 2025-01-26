@@ -5,6 +5,7 @@ const AnalysisController = require("../controllers/analysis.controller");
 router.post("/compare", AnalysisController.compareData);
 router.post("/resolve-discrepancy", AnalysisController.resolveDiscrepancy);
 router.get("/history", AnalysisController.getAnalyses);
+router.get("/datesNotDone", AnalysisController.getAnalysisNotDoneDates);
 router.get("/:id", AnalysisController.getAnalysisById);
 router.post("/bank-compare", AnalysisController.compareBankData);
 router.post("/bankResolve", AnalysisController.resolveBankDiscrepancy);
