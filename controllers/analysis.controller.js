@@ -382,7 +382,7 @@ class AnalysisController {
       });
 
       const matches = [];
-      const usedSapMatches = new Set();
+      
       const excelDiscrepancies = [];
       const sapDiscrepancies = [...selectedRangeSapData]; // Use selected range for discrepancies
       const extendedSapDiscrepancies = [...allSapData, ...paymentsWithoutPOS2]; // Use all data for extended discrepancies
@@ -407,11 +407,19 @@ class AnalysisController {
             return;
           }
 
-          if (!sapEntry.paymentMethod && excelEntry.category === "Non Payées") {
+          if (
+            !sapEntry.paymentMethod &&
+            excelEntry.category === "Non Payées"
+           
+          ) {
             return;
           }
 
-          if (sapEntry.paymentMethod && excelEntry.category !== "Non Payées") {
+          if (
+            sapEntry.paymentMethod &&
+            excelEntry.category !== "Non Payées"
+            
+          ) {
             return;
           }
 
@@ -469,11 +477,6 @@ class AnalysisController {
         });
 
         if (bestMatch) {
-          const matchKey = `${bestMatch.CardName}-${bestMatch.DocTotal}`;
-          if (usedSapMatches.has(matchKey)) {
-            continue;
-          }
-          usedSapMatches.add(matchKey);
           matches.push({
             date: excelEntry.date,
             excelClient: excelEntry.client,
@@ -551,11 +554,6 @@ class AnalysisController {
           });
 
           if (bestPaymentMatch) {
-            const paymentMatchKey = `${bestPaymentMatch.CardName}-${bestPaymentMatch.DocTotal}`;
-            if (usedSapMatches.has(paymentMatchKey)) {
-              continue;
-            }
-            usedSapMatches.add(paymentMatchKey);
             matches.push({
               date: excelEntry.date,
               excelClient: excelEntry.client,
