@@ -382,10 +382,10 @@ class AnalysisController {
       });
 
       const matches = [];
-      
+
       const excelDiscrepancies = [];
       const sapDiscrepancies = [...selectedRangeSapData]; // Use selected range for discrepancies
-      const extendedSapDiscrepancies = [...allSapData, ...paymentsWithoutPOS]; // Use all data for extended discrepancies
+      const extendedSapDiscrepancies = [...allSapData]; // Use all data for extended discrepancies
 
       const allData = [...allSapData];
 
@@ -407,19 +407,11 @@ class AnalysisController {
             return;
           }
 
-          if (
-            !sapEntry.paymentMethod &&
-            excelEntry.category === "Non Payées"
-           
-          ) {
+          if (!sapEntry.paymentMethod && excelEntry.category === "Non Payées") {
             return;
           }
 
-          if (
-            sapEntry.paymentMethod &&
-            excelEntry.category !== "Non Payées"
-            
-          ) {
+          if (sapEntry.paymentMethod && excelEntry.category !== "Non Payées") {
             return;
           }
 
@@ -803,12 +795,17 @@ class AnalysisController {
         paymentToInvoiceMap[link.paymentNumber] = link.invoiceNumber;
       });
 
-      // 5. Find payments that don't have corresponding invoices
+      // 5. Find payments that don't have corresponding invoices that have been matched
       let unmatchedPayments = paymentsWithAdjustedDates.filter((payment) => {
         // Check if we have an invoice number for this payment
         const hasInvoice = paymentToInvoiceMap.hasOwnProperty(payment.DocNum);
 
-        if (!hasInvoice) {
+        // Check if this payment has been matched
+        const isMatched = matches.some(
+          (match) => match.sapCustomer === payment.CardName
+        );
+
+        if (!hasInvoice || !isMatched) {
           // This payment has no invoice link at all
           return true;
         }
