@@ -461,7 +461,7 @@ class AnalysisController {
           }
         });
 
-        if (bestMatch && excelClient !== "genia") {
+        if (bestMatch && excelEntry.client !== "genia") {
           matches.push({
             date: excelEntry.date,
             excelClient: excelEntry.client,
