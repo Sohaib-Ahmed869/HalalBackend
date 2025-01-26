@@ -804,7 +804,7 @@ class AnalysisController {
             payment.adjustedDate.setHours(0, 0, 0, 0)
         );
 
-        if (!hasInvoice || (!hasExcelRecord)) {
+        if (!hasInvoice) {
           // This payment has no invoice link at all
           return true;
         }
