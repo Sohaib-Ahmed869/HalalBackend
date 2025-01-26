@@ -408,7 +408,7 @@ class AnalysisController {
 
           if (
             !sapEntry.paymentMethod &&
-            excelEntry.category === "Non Payées" &&
+            excelEntry.category === "Non Payées"
            
           ) {
             return;
@@ -416,7 +416,7 @@ class AnalysisController {
 
           if (
             sapEntry.paymentMethod &&
-            excelEntry.category !== "Non Payées" &&
+            excelEntry.category !== "Non Payées"
             
           ) {
             return;
