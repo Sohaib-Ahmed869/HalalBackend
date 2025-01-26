@@ -791,7 +791,20 @@ class AnalysisController {
         // Check if we have an invoice number for this payment
         const hasInvoice = paymentToInvoiceMap.hasOwnProperty(payment.DocNum);
 
-        if (!hasInvoice) {
+        // check if we have a payment on this day which does not have an excel record or sap invoice for the same day
+        const hasExcelRecord = flattenedExcelData.some(
+          (entry) =>
+            new Date(entry.date).setHours(0, 0, 0, 0) ===
+            payment.adjustedDate.setHours(0, 0, 0, 0)
+        );
+
+        const hasSapInvoice = allSapData.some(
+          (invoice) =>
+            new Date(invoice.CreationDate).setHours(0, 0, 0, 0) ===
+            payment.adjustedDate.setHours(0, 0, 0, 0)
+        );
+
+        if (!hasInvoice || (!hasExcelRecord && !hasSapInvoice)) {
           // This payment has no invoice link at all
           return true;
         }
