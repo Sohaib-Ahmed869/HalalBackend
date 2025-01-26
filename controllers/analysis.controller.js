@@ -409,7 +409,7 @@ class AnalysisController {
           if (
             !sapEntry.paymentMethod &&
             excelEntry.category === "Non Payées" &&
-            sapEntry.paymentMethod.toLowerCase().includes("non payées")
+           
           ) {
             return;
           }
@@ -417,7 +417,7 @@ class AnalysisController {
           if (
             sapEntry.paymentMethod &&
             excelEntry.category !== "Non Payées" &&
-            sapEntry.paymentMethod.toLowerCase().includes("non payées")
+            
           ) {
             return;
           }
