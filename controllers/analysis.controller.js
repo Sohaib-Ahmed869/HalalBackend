@@ -381,7 +381,6 @@ class AnalysisController {
         flattenedExcelData.push(...flattened);
       });
 
-      
       const matches = [];
       const excelDiscrepancies = [];
       const sapDiscrepancies = [...selectedRangeSapData]; // Use selected range for discrepancies
@@ -403,6 +402,22 @@ class AnalysisController {
             sapEntry.CardCode === "C9999" ||
             sapEntry.CardName?.toLowerCase().includes("comptoir") ||
             sapEntry.U_EPOSNo != null
+          ) {
+            return;
+          }
+
+          if (
+            !sapEntry.paymentMethod &&
+            excelEntry.category === "Non Payées" &&
+            sapEntry.paymentMethod.toLowerCase().includes("non payées")
+          ) {
+            return;
+          }
+
+          if (
+            sapEntry.paymentMethod &&
+            excelEntry.category !== "Non Payées" &&
+            sapEntry.paymentMethod.toLowerCase().includes("non payées")
           ) {
             return;
           }
@@ -1297,6 +1312,12 @@ class AnalysisController {
         excelDiscrepancies: analysis.excelDiscrepancies
           ? Object.fromEntries(Object.entries(analysis.excelDiscrepancies))
           : {},
+        //payment discrepancies will be all that for which matchedTransactions is empty
+        paymentDiscrepancies: analysis.unmatchedPayments.filter(
+          (payment) =>
+            !payment.matchedTransactions ||
+            payment.matchedTransactions.length === 0
+        ).length,
         // Explicitly include all references
         cash_references: analysis.cash_references || [],
         cheque_references: analysis.cheque_references || [],
