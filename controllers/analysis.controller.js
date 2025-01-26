@@ -396,6 +396,8 @@ class AnalysisController {
         let bestScore = 0;
         let bestIndex = -1;
 
+        const category = excelEntry.category;
+
         allData.forEach((sapEntry, index) => {
           // Skip POS entries in SAP
           if (
@@ -459,7 +461,7 @@ class AnalysisController {
           }
         });
 
-        if (bestMatch) {
+        if (bestMatch && excelClient !== "genia") {
           matches.push({
             date: excelEntry.date,
             excelClient: excelEntry.client,
