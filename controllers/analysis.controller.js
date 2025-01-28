@@ -752,6 +752,7 @@ class AnalysisController {
         ),
       }));
 
+      // 1. Get all payments for the date range
       let payments2 = await Payment.find({
         CreationDate: {
           $gte: SSD,
@@ -759,59 +760,100 @@ class AnalysisController {
         },
       }).lean();
 
-      //remove the payments that are POS
-      payments2 = payments2.filter(
-        (payment) =>
-          payment.CardCode !== "C9999" &&
-          !payment.CardName?.toLowerCase().includes("comptoir") &&
-          payment.U_EPOSNo == null
-      );
-
-      // 2. For each payment, adjust the date by adding one day
-      const paymentsWithAdjustedDates = payments2.map((payment) => ({
-        ...payment,
-        adjustedDate: (() => {
-          const adjustedDate = new Date(payment.DocDate);
-          adjustedDate.setDate(adjustedDate.getDate() + 1);
-          return adjustedDate;
-        })(),
-      }));
-
-      // 3. Get payment links for these payments
+      // 2. Get payment links for these payments
       const paymentLinks2 = await PaymentLink.find({
         paymentNumber: { $in: payments2.map((p) => p.DocNum) },
       }).lean();
 
-      // 4. Create map of payment numbers to invoice numbers
-      const paymentToInvoiceMap = {};
+      // 3. Create a map of payment numbers to their invoice numbers
+      const paymentToInvoiceMap = new Map();
       paymentLinks2.forEach((link) => {
-        paymentToInvoiceMap[link.paymentNumber] = link.invoiceNumber;
+        paymentToInvoiceMap.set(link.paymentNumber, link.invoiceNumber);
       });
 
-      // 5. Find payments that don't have corresponding invoices
-      let unmatchedPayments = paymentsWithAdjustedDates.filter((payment) => {
-        // Check if we have an invoice number for this payment
-        const hasInvoice = paymentToInvoiceMap.hasOwnProperty(payment.DocNum);
+      // 4. Get all corresponding invoices to check for POS
+      const linkedInvoices = await Invoice.find({
+        DocNum: { $in: [...paymentToInvoiceMap.values()] },
+      }).lean();
 
-        // check if we have a payment on this day which does not have an excel record or sap invoice for the same day
-        const hasExcelRecord = flattenedExcelData.some(
-          (entry) =>
-            new Date(entry.date).setHours(0, 0, 0, 0) ===
-            payment.adjustedDate.setHours(0, 0, 0, 0)
+      // Create a map of invoice numbers to invoices for easy lookup
+      const invoiceMap = new Map(
+        linkedInvoices.map((inv) => [inv.DocNum, inv])
+      );
+
+      // 5. Filter out payments whose linked invoices are POS
+      const nonPOSPayments = payments2.filter((payment) => {
+        const linkedInvoiceNum = paymentToInvoiceMap.get(payment.DocNum);
+        if (!linkedInvoiceNum) return true; // Keep payments without linked invoices
+
+        const linkedInvoice = invoiceMap.get(linkedInvoiceNum);
+        if (!linkedInvoice) return true; // Keep payments whose linked invoices we couldn't find
+
+        // Filter out if linked invoice is POS
+        return !(
+          linkedInvoice.CardCode === "C9999" ||
+          linkedInvoice.CardName?.toLowerCase().includes("comptoir") ||
+          linkedInvoice.U_EPOSNo != null
+        );
+      });
+
+      // 6. Create sets of matched payments and invoices from the matches array
+      const matchedInvoiceNumbers = new Set();
+      const matchedPaymentNumbers = new Set();
+
+      // Go through all matches from the analysis
+      matches.forEach((match) => {
+        // Add invoice numbers from matches
+        if (match.sapDocNum) {
+          matchedInvoiceNumbers.add(match.sapDocNum);
+        }
+
+        // If this was a payment match, find and add the payment number
+        const matchedPayment = nonPOSPayments.find(
+          (payment) =>
+            payment.DocTotal === match.sapAmount &&
+            payment.CardName === match.sapCustomer &&
+            new Date(payment.DocDate).setHours(0, 0, 0, 0) ===
+              new Date(match.date).setHours(0, 0, 0, 0)
         );
 
-        const hasSapInvoice = allSapData.some(
-          (invoice) =>
-            new Date(invoice.CreationDate).setHours(0, 0, 0, 0) ===
-            payment.adjustedDate.setHours(0, 0, 0, 0)
-        );
-
-        if (!hasInvoice || !hasExcelRecord) {
-          // This payment has no invoice link at all
-          return true;
+        if (matchedPayment) {
+          matchedPaymentNumbers.add(matchedPayment.DocNum);
         }
       });
 
+      // 7. Filter for truly unmatched payments
+      const unmatchedPayments = nonPOSPayments.filter((payment) => {
+        // If payment was already matched in the analysis, exclude it
+        if (matchedPaymentNumbers.has(payment.DocNum)) {
+          return false;
+        }
+
+        // Get linked invoice number
+        const linkedInvoiceNum = paymentToInvoiceMap.get(payment.DocNum);
+
+        // If linked invoice was matched in the analysis, exclude this payment
+        if (linkedInvoiceNum && matchedInvoiceNumbers.has(linkedInvoiceNum)) {
+          return false;
+        }
+
+        // Check if payment exists in matches array using date, amount, and customer name
+        const isMatchedInAnalysis = matches.some(
+          (match) =>
+            match.sapAmount === payment.DocTotal &&
+            new Date(match.date).setHours(0, 0, 0, 0) ===
+              new Date(payment.DocDate).setHours(0, 0, 0, 0) &&
+            match.sapCustomer === payment.CardName
+        );
+
+        // Exclude if payment was matched in analysis
+        if (isMatchedInAnalysis) {
+          return false;
+        }
+
+        // Include this payment as it's truly unmatched
+        return true;
+      });
       // Create new analysis document
       const analysis = new Analysis({
         dateRange: {
