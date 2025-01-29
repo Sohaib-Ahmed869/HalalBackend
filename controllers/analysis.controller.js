@@ -1351,7 +1351,11 @@ class AnalysisController {
           ? Object.fromEntries(Object.entries(analysis.matches))
           : {},
         excelDiscrepancies: analysis.excelDiscrepancies
-          ? Object.fromEntries(Object.entries(analysis.excelDiscrepancies))
+          ? Object.fromEntries(
+              Object.entries(analysis.excelDiscrepancies).filter(
+                ([_, discrepancy]) => discrepancy.resolved === false
+              )
+            )
           : {},
         //payment discrepancies will be all that for which matchedTransactions is empty
         paymentDiscrepancies: analysis.unmatchedPayments.filter(
