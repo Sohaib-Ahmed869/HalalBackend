@@ -1342,7 +1342,7 @@ class AnalysisController {
       const analyses = await Analysis.find(query)
         .sort({ performed: -1 })
         .limit(100)
-        .lean(); // Add .lean() to get plain objects
+        .lean();
 
       // Transform Map-like objects to regular objects and include references
       const transformedAnalyses = analyses.map((analysis) => ({
@@ -1352,25 +1352,32 @@ class AnalysisController {
           : {},
         excelDiscrepancies: analysis.excelDiscrepancies
           ? Object.fromEntries(
-              Object.entries(analysis.excelDiscrepancies).filter(
-                ([_, discrepancy]) => discrepancy.resolved === false
+              Object.entries(analysis.excelDiscrepancies).map(
+                ([category, discrepancies]) => [
+                  category,
+                  // Filter out resolved discrepancies and maintain array structure
+                  discrepancies.filter((d) => !d.resolved),
+                ]
               )
             )
           : {},
-        //payment discrepancies will be all that for which matchedTransactions is empty
-        paymentDiscrepancies: analysis.unmatchedPayments.filter(
-          (payment) =>
-            !payment.matchedTransactions ||
-            payment.matchedTransactions.length === 0
-        ).length,
+        unmatched_excel_count: Object.values(analysis.excelDiscrepancies || {})
+          .flat()
+          .filter((d) => !d.resolved).length,
+        unmatched_sap_count: (analysis.sapDiscrepancies || []).length,
+        paymentDiscrepancies: analysis.unmatchedPayments
+          ? analysis.unmatchedPayments.filter(
+              (payment) =>
+                !payment.matchedTransactions ||
+                payment.matchedTransactions.length === 0
+            ).length
+          : 0,
         // Explicitly include all references
         cash_references: analysis.cash_references || [],
         cheque_references: analysis.cheque_references || [],
         bank_references: analysis.bank_references || [],
         transfer_references: analysis.transfer_references || [],
       }));
-
-      console.log("Fetched analyses:", transformedAnalyses);
 
       res.json(transformedAnalyses);
     } catch (error) {
@@ -2801,9 +2808,7 @@ class AnalysisController {
       //get sale dates to cut the time part
       saleDates = saleDates.map((d) => d.toISOString().split("T")[0]);
 
-      const missingDates = saleDates.filter(
-        (d) => !analysisDates.includes(d)
-      );
+      const missingDates = saleDates.filter((d) => !analysisDates.includes(d));
 
       res.json({ missingDates });
     } catch (error) {
