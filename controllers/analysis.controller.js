@@ -2791,12 +2791,18 @@ class AnalysisController {
   static async getAnalysisNotDoneDates(req, res) {
     try {
       const analyses = await Analysis.find().lean();
-      const analysisDates = analyses.map((a) => a.dateRange.start);
+      let analysisDates = analyses.map((a) => a.dateRange.start);
+      //get analysis dates to cut the time part
+      analysisDates = analysisDates.map((d) => d.toISOString().split("T")[0]);
+
+      console.log("Analysis dates:", analysisDates);
       const sales = await Sale.find().lean();
-      const saleDates = sales.map((s) => s.date);
+      let saleDates = sales.map((s) => s.date);
+      //get sale dates to cut the time part
+      saleDates = saleDates.map((d) => d.toISOString().split("T")[0]);
 
       const missingDates = saleDates.filter(
-        (d) => !analysisDates.includes(d.toISOString())
+        (d) => !analysisDates.includes(d)
       );
 
       res.json({ missingDates });
