@@ -34,4 +34,9 @@ router.post(
   AnalysisController.findPotentialExcelMatchesForPayment
 );
 
+router.post(
+  "/check-payment-resolutions",
+  AnalysisController.checkPaymentResolutions
+);
+
 module.exports = router;
