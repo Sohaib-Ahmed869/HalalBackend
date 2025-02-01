@@ -294,13 +294,23 @@ class AnalysisController {
 
       if (existingAnalysis) {
         // console.log(existingAnalysis.extendedSapDiscrepancies);
+        // get the unmatched payments which have not been resolved
+        const unmatchedPayments = existingAnalysis.unmatchedPayments;
+        const unresolvedPayments = unmatchedPayments.filter(
+          (payment) => !payment.resolved
+        );
+        //include unresolved payments in the extendedSapDiscrepancies
+        const extendedSapDiscrepancies = [
+          ...existingAnalysis.extendedSapDiscrepancies,
+          ...unresolvedPayments,
+        ];
         console.log("existing analysis found");
         return res.json({
           analysisId: existingAnalysis._id,
           matches: existingAnalysis.matches,
           excelDiscrepancies: existingAnalysis.excelDiscrepancies,
           sapDiscrepancies: existingAnalysis.sapDiscrepancies,
-          extendedSapDiscrepancies: existingAnalysis.extendedSapDiscrepancies,
+          extendedSapDiscrepancies: extendedSapDiscrepancies,
           posAnalysis: existingAnalysis.posAnalysis,
           pos_closed_off: existingAnalysis.pos_closed_off,
           unmatchedPayments: existingAnalysis.unmatchedPayments,
