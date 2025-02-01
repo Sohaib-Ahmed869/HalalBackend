@@ -1600,19 +1600,23 @@ class AnalysisController {
       //get the start date
       startDate.setHours(0, 0, 0, 0);
 
+      //minus 15 days from the start date
+      let startingDate = new Date(dateRange.start);
+      startingDate.setDate(startingDate.getDate() - 30);
+
       let endingDate = new Date(dateRange.end);
       //get the end date
       endingDate.setHours(23, 59, 59, 999);
 
       let endDate = new Date(dateRange.end);
       //add 15 days to the end date
-      endDate.setDate(endDate.getDate() + 15);
+      endDate.setDate(endDate.getDate() + 30);
 
       // 1. Fetch bank statements within date range
       const bankStatements = await BankStatement.find({
         amount: { $exists: true, $ne: null },
         operationDate: {
-          $gte: new Date(dateRange.start),
+          $gte: new Date(startingDate),
           $lte: new Date(endDate),
         },
         operationRef: { $exists: true, $ne: null, $ne: "" },
