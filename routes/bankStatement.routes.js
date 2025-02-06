@@ -10,5 +10,8 @@ router.post(
   BankStatementController.uploadStatement
 );
 router.get("/", BankStatementController.getStatements);
+router.get("/tag-stats", BankStatementController.getTagStats);
+router.put("/:statementId/tag", BankStatementController.tagStatement);
+
 
 module.exports = router;

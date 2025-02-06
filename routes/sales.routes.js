@@ -7,7 +7,7 @@ const Sale = require("../models/sales.model");
 const upload = multer({ storage: multer.memoryStorage() });
 
 const FLASK_BACKEND_URL = "http://127.0.0.1:5000/process_excel";
-
+``;
 // Function to transform data into desired schema
 const transformData = (dayData, date) => {
   return {
@@ -32,6 +32,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     const { start, end } = req.query;
     console.log("Start date:", start);
     console.log("End date:", end);
+
     if (!start || !end) {
       console.log("Start and end dates are required");
       return res.status(400).json({
@@ -75,6 +76,8 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         // Construct the date
         const [year, month] = start.split("-");
         const date = new Date(Number(year), Number(month) - 1, Number(day));
+        //set hours to 22:00:00
+        date.setHours(22, 0, 0, 0);
 
         // Transform the data according to our schema
         const transformedData = transformData(dayData, date);
@@ -109,6 +112,8 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const { start, end } = req.query;
+    console.log("Start date:", start);
+    console.log("End date:", end);
     if (!start || !end) {
       return res
         .status(400)
@@ -118,8 +123,9 @@ router.get("/", async (req, res) => {
     const startDate = new Date(start);
     startDate.setDate(startDate.getDate());
     const endDate = new Date(end);
-    endDate.setHours(23, 59, 59, 999);
-
+    endDate.setHours(23, 59, 59, 0);
+    console.log("Start date:", startDate);
+    console.log("End date:", endDate);
     if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
       return res.status(400).json({ error: "Invalid date format" });
     }
@@ -130,6 +136,8 @@ router.get("/", async (req, res) => {
         $lte: endDate,
       },
     }).sort({ date: 1 });
+
+    console.log("Sales fetched:", sales.length);
 
     res.json(sales);
   } catch (error) {

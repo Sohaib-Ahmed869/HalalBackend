@@ -2,6 +2,8 @@ const axios = require("axios");
 const Invoice = require("../models/invoice.model");
 const Payment = require("../models/payment.model");
 const PaymentLink = require("../models/paymentLinks.model");
+const CreditNotes = require("../models/creditnotes.model");
+const Return = require("../models/returns.model");
 
 class InvoiceController {
   static async getInvoices(req, res) {
@@ -440,6 +442,386 @@ class InvoiceController {
       res.status(500).json({ error: "Failed to fetch invoice statistics" });
     }
   }
+
+  static async getCustomerBalance(cardCode) {
+    try {
+      const result = await Invoice.aggregate([
+        { $match: { CardCode: cardCode } },
+        {
+          $group: {
+            _id: null,
+            totalInvoiced: { $sum: "$DocTotal" },
+            totalPaid: { $sum: "$PaidToDate" },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            balance: { $subtract: ["$totalInvoiced", "$totalPaid"] },
+          },
+        },
+      ]);
+
+      return result[0]?.balance || 0;
+    } catch (error) {
+      console.error(
+        `Error calculating balance for customer ${cardCode}:`,
+        error
+      );
+      return 0;
+    }
+  }
+
+  static async getCustomerBalance(cardCode) {
+    try {
+      const result = await Invoice.aggregate([
+        { $match: { CardCode: cardCode } },
+        {
+          $group: {
+            _id: null,
+            totalInvoiced: { $sum: "$DocTotal" },
+            totalPaid: { $sum: "$PaidToDate" },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            balance: { $subtract: ["$totalInvoiced", "$totalPaid"] },
+          },
+        },
+      ]);
+
+      return result[0]?.balance || 0;
+    } catch (error) {
+      console.error(
+        `Error calculating balance for customer ${cardCode}:`,
+        error
+      );
+      return 0;
+    }
+  }
+
+  static async getCustomerLastActivity(cardCode) {
+    try {
+      const lastInvoice = await Invoice.findOne(
+        { CardCode: cardCode },
+        { DocDate: 1, DocNum: 1 }
+      ).sort({ DocDate: -1 });
+
+      if (!lastInvoice) {
+        return null;
+      }
+
+      return {
+        date: lastInvoice.DocDate,
+        type: "Invoice",
+        reference: lastInvoice.DocNum,
+      };
+    } catch (error) {
+      console.error(
+        `Error getting last activity for customer ${cardCode}:`,
+        error
+      );
+      return null;
+    }
+  }
+
+  static async getCustomerCreditNotes(req, res) {
+    try {
+      const { cardCode } = req.params;
+      const { startDate, endDate } = req.query;
+
+      if (!cardCode) {
+        return res.status(400).json({
+          error: "Customer code is required",
+        });
+      }
+
+      // Build query object
+      let query = { CardCode: cardCode };
+
+      // Add date range if provided
+      if (startDate && endDate) {
+        query.DocDate = {
+          $gte: new Date(startDate),
+          $lte: new Date(endDate),
+        };
+      }
+
+      const creditNotes = await CreditNotes.find(query)
+        .sort({ DocDate: -1 })
+        .lean();
+
+      // Transform data to match frontend needs
+      const transformedCreditNotes = creditNotes.map((note) => ({
+        docEntry: note.DocEntry,
+        docNum: note.DocNum,
+        docDate: note.DocDate,
+        docTotal: note.DocTotal,
+        cardName: note.CardName,
+        cardCode: note.CardCode,
+        comments: note.Comments,
+        reference1: note.Reference1,
+        reference2: note.Reference2,
+        documentLines:
+          note.DocumentLines?.map((line) => ({
+            itemCode: line.ItemCode,
+            itemDescription: line.ItemDescription,
+            quantity: line.Quantity,
+            price: line.Price,
+            lineTotal: line.LineTotal,
+            vatGroup: line.VatGroup,
+          })) || [],
+      }));
+
+   
+
+      res.json({
+        success: true,
+        count: transformedCreditNotes.length,
+        data: transformedCreditNotes,
+      });
+    } catch (error) {
+      console.error("Error fetching customer credit notes:", error);
+      res.status(500).json({
+        error: "Failed to fetch customer credit notes",
+        details: error.message,
+      });
+    }
+  }
+
+  static async getCustomerReturns(req, res) {
+    try {
+      const { cardCode } = req.params;
+      const { startDate, endDate } = req.query;
+
+      if (!cardCode) {
+        return res.status(400).json({
+          error: "Customer code is required",
+        });
+      }
+
+      // Build query object
+      let query = { CardCode: cardCode };
+
+      // Add date range if provided
+      if (startDate && endDate) {
+        query.DocDate = {
+          $gte: new Date(startDate),
+          $lte: new Date(endDate),
+        };
+      }
+
+      const returns = await Return.find(query).sort({ DocDate: -1 }).lean();
+
+      // Transform data to match frontend needs
+      const transformedReturns = returns.map((ret) => ({
+        docEntry: ret.DocEntry,
+        docNum: ret.DocNum,
+        docDate: ret.DocDate,
+        docTotal: ret.DocTotal,
+        cardName: ret.CardName,
+        cardCode: ret.CardCode,
+        comments: ret.Comments,
+        documentLines:
+          ret.DocumentLines?.map((line) => ({
+            itemCode: line.ItemCode,
+            itemDescription: line.ItemDescription,
+            quantity: line.Quantity,
+            price: line.Price,
+            lineTotal: line.LineTotal,
+            vatGroup: line.VatGroup,
+            warehouse: line.WarehouseCode,
+          })) || [],
+        totalVolume: ret.calculateTotalVolume?.() || 0,
+        totalWeight: ret.calculateTotalWeight?.() || 0,
+        shippingAddress: ret.getFormattedShippingAddress?.() || "",
+      }));
+
+      res.json({
+        success: true,
+        count: transformedReturns.length,
+        data: transformedReturns,
+      });
+    } catch (error) {
+      console.error("Error fetching customer returns:", error);
+      res.status(500).json({
+        error: "Failed to fetch customer returns",
+        details: error.message,
+      });
+    }
+  }
+
+  static async getCustomerDetailedStats(req, res) {
+    try {
+      const { cardCode } = req.params;
+      const { startDate, endDate } = req.query;
+
+      let dateMatch = {};
+      if (startDate && endDate) {
+        dateMatch.DocDate = {
+          $gte: new Date(startDate),
+          $lte: new Date(endDate),
+        };
+      }
+
+      const pipeline = [
+        {
+          $match: {
+            CardCode: cardCode,
+            ...dateMatch,
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalInvoices: { $sum: 1 },
+            totalAmount: { $sum: "$DocTotal" },
+            totalPaid: { $sum: "$PaidToDate" },
+            averageInvoiceAmount: { $avg: "$DocTotal" },
+            invoicesByMonth: {
+              $push: {
+                date: "$DocDate",
+                amount: "$DocTotal",
+              },
+            },
+            paymentMethods: {
+              $addToSet: "$paymentMethod",
+            },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            totalInvoices: 1,
+            totalAmount: 1,
+            totalPaid: 1,
+            balance: { $subtract: ["$totalAmount", "$totalPaid"] },
+            averageInvoiceAmount: 1,
+            invoicesByMonth: 1,
+            paymentMethods: 1,
+          },
+        },
+      ];
+
+      const stats = await Invoice.aggregate(pipeline);
+
+      if (stats.length === 0) {
+        return res
+          .status(404)
+          .json({ error: "Customer not found or no data available" });
+      }
+
+      const lastActivity = await this.getCustomerLastActivity(cardCode);
+
+      res.json({
+        ...stats[0],
+        lastActivity,
+      });
+    } catch (error) {
+      console.error("Error fetching customer detailed stats:", error);
+      res
+        .status(500)
+        .json({ error: "Failed to fetch customer detailed statistics" });
+    }
+  }
+
+  static async getCustomerPayments(req, res) {
+    try {
+      const { cardCode } = req.params;
+      const { startDate, endDate } = req.query;
+
+      if (!cardCode) {
+        return res.status(400).json({
+          error: "Customer code is required",
+        });
+      }
+
+      // Build query object
+      let query = { CardCode: cardCode };
+
+      // Add date range if provided
+      if (startDate && endDate) {
+        query.DocDate = {
+          $gte: new Date(startDate),
+          $lte: new Date(endDate),
+        };
+      }
+
+      const payments = await Payment.find(query).sort({ DocDate: -1 }).lean();
+
+      // Transform the payment data
+      const transformedPayments = payments.map((payment) => ({
+        docEntry: payment.DocEntry,
+        docNum: payment.DocNum,
+        docDate: payment.DocDate,
+        cardCode: payment.CardCode,
+        cardName: payment.CardName,
+        cashSum: payment.CashSum || 0,
+        checkSum: payment.CheckSum || 0,
+        creditSum: payment.CreditSum || 0,
+        docTotal: payment.DocTotal || 0,
+        transferSum: payment.TransferSum || 0,
+        transferDate: payment.TransferDate,
+        transferReference: payment.TransferReference,
+        paymentMethod: payment.PaymentMethod || "Unknown",
+        comments: payment.Comments,
+        transferAccount: payment.TransferAccount,
+        checkAccount: payment.CheckAccount,
+        checkNumber: payment.CheckNumber,
+        checkBank: payment.CheckBank,
+        paymentInvoices:
+          payment.PaymentInvoices?.map((inv) => ({
+            docEntry: inv.DocEntry,
+            sumApplied: inv.SumApplied,
+            invoiceTotal: inv.InvoiceTotal,
+            docNum: inv.DocNum,
+            docDate: inv.DocDate,
+          })) || [],
+        status: payment.Cancelled ? "Cancelled" : "Active",
+      }));
+
+      // Add summary statistics
+      const summary = {
+        totalAmount: transformedPayments.reduce(
+          (sum, p) => sum + p.docTotal,
+          0
+        ),
+        byMethod: {
+          cash: transformedPayments.reduce(
+            (sum, p) => sum + (p.cashSum || 0),
+            0
+          ),
+          check: transformedPayments.reduce(
+            (sum, p) => sum + (p.checkSum || 0),
+            0
+          ),
+          credit: transformedPayments.reduce(
+            (sum, p) => sum + (p.creditSum || 0),
+            0
+          ),
+          transfer: transformedPayments.reduce(
+            (sum, p) => sum + (p.transferSum || 0),
+            0
+          ),
+        },
+        count: transformedPayments.length,
+      };
+
+      res.json({
+        success: true,
+        data: transformedPayments,
+        summary,
+        count: transformedPayments.length,
+      });
+    } catch (error) {
+      console.error("Error fetching customer payments:", error);
+      res.status(500).json({
+        error: "Failed to fetch customer payments",
+        details: error.message,
+      });
+    }
+  }
   // Add to InvoiceController class
   static async getCustomerStats(req, res) {
     try {
@@ -465,6 +847,7 @@ class InvoiceController {
         {
           $group: {
             _id: "$CardName",
+            cardCode: { $first: "$CardCode" },
             customerName: { $first: "$CardName" },
             tag: { $first: "$tag" },
             totalSales: { $sum: "$DocTotal" },
@@ -511,15 +894,15 @@ class InvoiceController {
 
   static async getCustomerInvoices(req, res) {
     try {
-      const { customerName, status } = req.query;
-
-      if (!customerName) {
+      const { cardCode, status } = req.query;
+      console.log("Query:", req.query);
+      if (!cardCode) {
         return res.status(400).json({
           error: "Customer name is required",
         });
       }
 
-      let query = { CardName: customerName };
+      let query = { CardCode: cardCode };
 
       // Add status filter if provided
       if (status === "paid") {
@@ -768,7 +1151,7 @@ class InvoiceController {
         },
         DocNum: {
           $gte: 280758,
-        }
+        },
       });
 
       console.log(`Found ${invoices.length} invoices from 2024 to process`);
@@ -869,6 +1252,158 @@ class InvoiceController {
     } catch (error) {
       console.error("Error updating payment methods:", error);
       res.status(500).json({ error: "Failed to update payment methods" });
+    }
+  }
+
+  static async getCustomerAnalytics(req, res) {
+    try {
+      // Get date range from query params or use default
+      const startDate = req.query.startDate
+        ? new Date(req.query.startDate)
+        : new Date(new Date().getFullYear(), 0, 1);
+      const endDate = req.query.endDate
+        ? new Date(req.query.endDate)
+        : new Date();
+
+      const pipeline = [
+        {
+          $match: {
+            DocDate: { $gte: startDate, $lte: endDate },
+          },
+        },
+        {
+          $unwind: "$DocumentLines",
+        },
+        {
+          $group: {
+            _id: "$CardName",
+            totalSales: { $sum: "$DocumentLines.LineTotal" },
+            quantitySold: { $sum: "$DocumentLines.Quantity" },
+            invoiceCount: { $addToSet: "$DocEntry" },
+            productsSold: {
+              $addToSet: {
+                itemCode: "$DocumentLines.ItemCode",
+                itemName: "$DocumentLines.ItemDescription",
+                quantity: "$DocumentLines.Quantity",
+                lineTotal: "$DocumentLines.LineTotal",
+              },
+            },
+          },
+        },
+        {
+          $project: {
+            name: "$_id",
+            totalSales: 1,
+            quantitySold: 1,
+            invoiceCount: { $size: "$invoiceCount" },
+            productCount: { $size: "$productsSold" },
+            // Calculate estimated profit (you'll need to adjust this based on your actual cost data)
+            grossProfit: { $multiply: ["$totalSales", 0.25] }, // Example: 25% profit margin
+            profitMargin: {
+              $multiply: [
+                {
+                  $divide: [
+                    { $multiply: ["$totalSales", 0.25] },
+                    "$totalSales",
+                  ],
+                },
+                100,
+              ],
+            },
+          },
+        },
+        {
+          $sort: { totalSales: -1 },
+        },
+      ];
+
+      const customers = await Invoice.aggregate(pipeline);
+
+      res.json({
+        success: true,
+        customers: customers.map((customer) => ({
+          ...customer,
+          totalSales: parseFloat(customer.totalSales.toFixed(2)),
+          grossProfit: parseFloat(customer.grossProfit.toFixed(2)),
+          profitMargin: parseFloat(customer.profitMargin.toFixed(2)),
+        })),
+      });
+    } catch (error) {
+      console.error("Error getting customer analytics:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async getCustomerProducts(req, res) {
+    try {
+      const { customerId } = req.params;
+      const startDate = req.query.startDate
+        ? new Date(req.query.startDate)
+        : new Date(new Date().getFullYear(), 0, 1);
+      const endDate = req.query.endDate
+        ? new Date(req.query.endDate)
+        : new Date();
+
+      const pipeline = [
+        {
+          $match: {
+            CardName: customerId,
+            DocDate: { $gte: startDate, $lte: endDate },
+          },
+        },
+        {
+          $unwind: "$DocumentLines",
+        },
+        {
+          $group: {
+            _id: {
+              itemCode: "$DocumentLines.ItemCode",
+              itemName: "$DocumentLines.ItemDescription",
+            },
+            quantity: { $sum: "$DocumentLines.Quantity" },
+            salesAmount: { $sum: "$DocumentLines.LineTotal" },
+          },
+        },
+        {
+          $project: {
+            id: "$_id.itemCode",
+            name: "$_id.itemName",
+            quantity: 1,
+            salesAmount: 1,
+            // Calculate estimated profit (adjust based on your cost data)
+            grossProfit: { $multiply: ["$salesAmount", 0.25] },
+            margin: {
+              $multiply: [
+                {
+                  $divide: [
+                    { $multiply: ["$salesAmount", 0.25] },
+                    "$salesAmount",
+                  ],
+                },
+                100,
+              ],
+            },
+          },
+        },
+        {
+          $sort: { salesAmount: -1 },
+        },
+      ];
+
+      const products = await Invoice.aggregate(pipeline);
+
+      res.json({
+        success: true,
+        products: products.map((product) => ({
+          ...product,
+          salesAmount: parseFloat(product.salesAmount.toFixed(2)),
+          grossProfit: parseFloat(product.grossProfit.toFixed(2)),
+          margin: parseFloat(product.margin.toFixed(2)),
+        })),
+      });
+    } catch (error) {
+      console.error("Error getting customer products:", error);
+      res.status(500).json({ error: error.message });
     }
   }
 }

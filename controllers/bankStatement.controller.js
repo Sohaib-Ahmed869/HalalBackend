@@ -235,7 +235,7 @@ class BankStatementController {
       // Add bankName to each transaction
       formattedData = formattedData.map((transaction) => ({
         ...transaction,
-        bank:bankName, // Add the bank name to each transaction
+        bank: bankName, // Add the bank name to each transaction
       }));
 
       // Store valid transactions in the database
@@ -267,6 +267,116 @@ class BankStatementController {
       });
 
       res.json(statements);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async tagStatement(req, res) {
+    try {
+      const { statementId } = req.params;
+      const { tag, notes } = req.body;
+
+      if (
+        !["sales", "expense", "transfer", "tax", "other", null].includes(tag)
+      ) {
+        return res.status(400).json({ error: "Invalid tag value" });
+      }
+
+      const statement = await BankStatement.findByIdAndUpdate(
+        statementId,
+        {
+          tag,
+          tagNotes: notes,
+          taggedAt: tag ? new Date() : null,
+          taggedBy: req.user?.username || "system", // Assuming you have user info in req
+        },
+        { new: true }
+      );
+
+      if (!statement) {
+        return res.status(404).json({ error: "Statement not found" });
+      }
+
+      res.json(statement);
+    } catch (error) {
+      console.error("Error tagging statement:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async getStatementsByTag(req, res) {
+    try {
+      const { tag, startDate, endDate } = req.query;
+      const query = { tag };
+
+      if (startDate || endDate) {
+        query.operationDate = {};
+        if (startDate) query.operationDate.$gte = new Date(startDate);
+        if (endDate) query.operationDate.$lte = new Date(endDate);
+      }
+
+      const statements = await BankStatement.find(query).sort({
+        operationDate: -1,
+      });
+
+      const total = await BankStatement.aggregate([
+        { $match: query },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: "$amount" },
+          },
+        },
+      ]);
+
+      res.json({
+        statements,
+        total: total[0]?.total || 0,
+        count: statements.length,
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+    static async getTagStats(req, res) {
+      try {
+        const { startDate, endDate } = req.query;
+        const dateMatch = {};
+
+        if (startDate || endDate) {
+          dateMatch.operationDate = {};
+          if (startDate) dateMatch.operationDate.$gte = new Date(startDate);
+          if (endDate) dateMatch.operationDate.$lte = new Date(endDate);
+        }
+
+        const stats = await BankStatement.aggregate([
+          { $match: dateMatch },
+        {
+          $group: {
+            _id: "$tag",
+            count: { $sum: 1 },
+            total: { $sum: "$amount" },
+            transactions: { $push: "$$ROOT" },
+          },
+        },
+        {
+          $project: {
+            tag: "$_id",
+            count: 1,
+            total: 1,
+            sampleTransactions: { $slice: ["$transactions", 5] },
+          },
+        },
+      ]);
+
+      res.json({
+        stats: stats.map((stat) => ({
+          ...stat,
+          tag: stat.tag || "untagged",
+        })),
+      });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }

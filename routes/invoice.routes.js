@@ -31,4 +31,19 @@ router.post(
   InvoiceController.updatePOSPaymentMethods
 );
 
+router.get("/customers/stats", InvoiceController.getCustomerAnalytics);
+router.get(
+  "/customers/:customerId/products",
+  InvoiceController.getCustomerProducts
+);
+
+router.get(
+  "/customer/:cardCode/credit-notes",
+  InvoiceController.getCustomerCreditNotes
+);
+router.get("/customer/:cardCode/returns", InvoiceController.getCustomerReturns);
+router.get(
+  "/customer/:cardCode/payments",
+  InvoiceController.getCustomerPayments
+);
 module.exports = router;

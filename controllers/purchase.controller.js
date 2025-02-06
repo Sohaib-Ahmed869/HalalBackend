@@ -1,106 +1,100 @@
-const axios = require("axios");
-const Purchase = require("../models/Purchase");
+const PurchaseInvoice = require("../models/Purchase");
 
-class PurchaseController {
-  static async getPurchaseOrders(req, res) {
+const purchaseInvoiceController = {
+  // Get all purchase invoices (with optional tag filter)
+  getAllPurchaseInvoices: async (req, res) => {
     try {
-      const purchases = await Purchase.find().lean();
+      const { page, limit } = req.query;
+      const { tag } = req.query;
+      let query = {};
 
-      const formattedPurchases = purchases.map((purchase) => ({
-        customerName: purchase.CardName || "",
-        invoiceNum: purchase.DocNum || "",
-        creationDate: purchase.CreateDate || "",
-        transactionDate: purchase.DocDate || "",
-        transactionNum: purchase.DocEntry || "",
-        amount: purchase.DocTotal || 0,
-        documentNum: purchase.docEntry || "",
-        method: purchase.PaymentMethod || "",
-        tag: purchase.tag || null,
-        verified: purchase.verified ? "Yes" : "No",
-      }));
-
-      console.log("Formatted purchases:", formattedPurchases);
-
-      res.json({
-        data: formattedPurchases,
-        orders: formattedPurchases, // matching frontend structure
-      });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch purchases" });
-    }
-  }
-
-  static async addTag(req, res) {
-    try {
-      const { docEntry, tag } = req.body;
-
-      if (!docEntry) {
-        return res.status(400).json({
-          error: "Both docEntry and tag are required",
-        });
+      if (tag) {
+        query.tags = tag;
       }
 
-      const purchase = await Purchase.findOne({ docEntry });
+      const options = {
+        page: parseInt(page, 10) || 1,
+        limit: parseInt(limit, 10) || 10,
+      };
 
+      const purchases = await PurchaseInvoice.paginate(query, options);
+      res.json(purchases);
+    } catch (error) {
+      res.status(500).json({ message: error.message });
+    }
+  },
+
+  // Get a single purchase invoice
+  getPurchaseInvoice: async (req, res) => {
+    try {
+      const purchase = await PurchaseInvoice.findById(req.params.id);
       if (!purchase) {
-        return res.status(404).json({
-          error: "Purchase order not found",
-        });
+        return res.status(404).json({ message: "Purchase invoice not found" });
       }
-
-      // Update the tag
-      purchase.tag = tag;
-      await purchase.save();
-
-      return res.json({
-        message: "Tag updated successfully",
-        docEntry,
-        tag: purchase.tag,
-      });
+      res.json(purchase);
     } catch (error) {
-      console.error("Error adding tag:", error);
-      res.status(500).json({
-        error: "Failed to add tag",
-        details: error.message,
-      });
+      res.status(500).json({ message: error.message });
     }
-  }
+  },
 
-  static async removeTag(req, res) {
+  // Add tags to a purchase invoice
+  addTags: async (req, res) => {
     try {
-      const { docEntry } = req.body;
-
-      if (!docEntry) {
-        return res.status(400).json({
-          error: "DocEntry is required",
-        });
+      const { tags } = req.body;
+      if (!Array.isArray(tags)) {
+        return res
+          .status(400)
+          .json({ message: "Tags must be provided as an array" });
       }
 
-      const purchase = await Purchase.findOne({ docEntry });
-
+      const purchase = await PurchaseInvoice.findById(req.params.id);
       if (!purchase) {
-        return res.status(404).json({
-          error: "Purchase order not found",
-        });
+        return res.status(404).json({ message: "Purchase invoice not found" });
       }
 
-      // Set tag to null
-      purchase.tag = null;
-      await purchase.save();
+      // Add new tags while avoiding duplicates
+      const uniqueTags = [...new Set([...purchase.tags, ...tags])];
+      purchase.tags = uniqueTags;
 
-      res.json({
-        message: "Tag removed successfully",
-        docEntry,
-        tag: null,
-      });
+      const updatedPurchase = await purchase.save();
+      res.json(updatedPurchase);
     } catch (error) {
-      console.error("Error removing tag:", error);
-      res.status(500).json({
-        error: "Failed to remove tag",
-        details: error.message,
-      });
+      res.status(500).json({ message: error.message });
     }
-  }
-}
+  },
 
-module.exports = PurchaseController;
+  // Remove tags from a purchase invoice
+  removeTags: async (req, res) => {
+    try {
+      const { tags } = req.body;
+      if (!Array.isArray(tags)) {
+        return res
+          .status(400)
+          .json({ message: "Tags must be provided as an array" });
+      }
+
+      const purchase = await PurchaseInvoice.findById(req.params.id);
+      if (!purchase) {
+        return res.status(404).json({ message: "Purchase invoice not found" });
+      }
+
+      purchase.tags = purchase.tags.filter((tag) => !tags.includes(tag));
+      const updatedPurchase = await purchase.save();
+      res.json(updatedPurchase);
+    } catch (error) {
+      res.status(500).json({ message: error.message });
+    }
+  },
+
+  // Get all unique tags
+  getAllTags: async (req, res) => {
+    try {
+      const uniqueTags = await PurchaseInvoice.distinct("tags");
+      res.json(uniqueTags);
+    } catch (error) {
+      res.status(500).json({ message: error.message });
+    }
+  },
+};
+
+module.exports = purchaseInvoiceController;

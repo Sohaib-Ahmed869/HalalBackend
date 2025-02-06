@@ -21,7 +21,7 @@ class ReturnsController {
         },
       })
         .skip(skip)
-        .limit(Number(limit));
+       
 
       // Total count for pagination
       const totalReturns = await Return.countDocuments({

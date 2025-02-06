@@ -19,6 +19,22 @@ const bankStatementSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  tag: {
+    type: String,
+    default: null,
+  },
+  taggedBy: {
+    type: String,
+    default: null,
+  },
+  taggedAt: {
+    type: Date,
+    default: null,
+  },
+  tagNotes: {
+    type: String,
+    default: null,
+  },
 });
 
 module.exports = mongoose.model("BankStatement", bankStatementSchema);

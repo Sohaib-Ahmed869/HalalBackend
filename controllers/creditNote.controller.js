@@ -21,7 +21,7 @@ class CreditNoteController {
         },
       })
         .skip(skip)
-        .limit(Number(limit));
+     
 
       // Total count for pagination
       const totalCreditNotes = await CreditNote.countDocuments({
