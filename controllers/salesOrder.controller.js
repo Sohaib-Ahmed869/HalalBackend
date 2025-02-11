@@ -255,9 +255,7 @@ const generatePaymentLink = async (req, res) => {
       merchantAccount: process.env.ADYEN_MERCHANT_ACCOUNT,
       shopperReference: salesOrder.CardCode,
       accountInfo: {
-        accountCreationDate: customer?.CreateDate
-          ? new Date(customer.CreateDate).toISOString().split("T")[0]
-          : undefined,
+        accountCreationDate: new Date(salesOrder.CreationDate).toISOString(),
         accountType: "business",
         metadata: {
           customerNumber: salesOrder.CardCode,
