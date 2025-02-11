@@ -254,11 +254,17 @@ const generatePaymentLink = async (req, res) => {
       countryCode: "FR",
       merchantAccount: process.env.ADYEN_MERCHANT_ACCOUNT,
       shopperReference: salesOrder.CardCode,
-      customer_account_info: [
-        {
-          unique_account_identifier: salesOrder.DocNum,
+      accountInfo: {
+        accountCreationDate: customer?.CreateDate
+          ? new Date(customer.CreateDate).toISOString().split("T")[0]
+          : undefined,
+        accountType: "business",
+        metadata: {
+          customerNumber: salesOrder.CardCode,
+          salesOrderNumber: salesOrder.DocNum,
+          customerName: salesOrder.CardName,
         },
-      ],
+      },
       company: {
         name: salesOrder.CardName,
       },
