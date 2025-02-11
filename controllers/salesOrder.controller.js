@@ -257,11 +257,12 @@ const generatePaymentLink = async (req, res) => {
       accountInfo: {
         accountCreationDate: new Date(salesOrder.CreationDate).toISOString(),
         // Removed accountType as it was causing validation error
-        metadata: {
-          customerNumber: salesOrder.CardCode,
-          salesOrderNumber: salesOrder.DocNum,
-          customerName: salesOrder.CardName,
-        },
+      },
+      // Moving relevant information to metadata at root level
+      metadata: {
+        customerNumber: salesOrder.CardCode,
+        salesOrderNumber: salesOrder.DocNum,
+        customerName: salesOrder.CardName,
       },
       company: {
         name: salesOrder.CardName,
