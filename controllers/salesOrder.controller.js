@@ -243,6 +243,19 @@ const generatePaymentLink = async (req, res) => {
       });
     }
 
+    const customer_acount_info = [
+      {
+        unique_account_identifier: salesOrder.CardCode,
+      },
+    ];
+
+    //encode it into base 64
+    const account_info = Buffer.from(
+      JSON.stringify(customer_acount_info)
+    ).toString("base64");
+
+    console.log("Base 64 code", account_info);
+
     // Prepare the payment link request for Adyen
     const paymentLinkRequest = {
       reference: `SO-${salesOrder.DocNum}`,
@@ -254,16 +267,11 @@ const generatePaymentLink = async (req, res) => {
       countryCode: "FR",
       merchantAccount: process.env.ADYEN_MERCHANT_ACCOUNT,
       shopperReference: salesOrder.CardCode,
-      accountInfo: {
-        accountCreationDate: new Date(salesOrder.CreationDate).toISOString(),
-        // Removed accountType as it was causing validation error
+      additionalData: {
+        manualCapture: "true",
+        "openinvoicedata.merchantData": account_info,
       },
-      // Moving relevant information to metadata at root level
-      metadata: {
-        customerNumber: salesOrder.CardCode,
-        salesOrderNumber: salesOrder.DocNum,
-        customerName: salesOrder.CardName,
-      },
+
       company: {
         name: salesOrder.CardName,
       },
