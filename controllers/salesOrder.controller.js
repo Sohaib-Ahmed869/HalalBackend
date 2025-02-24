@@ -243,15 +243,18 @@ const generatePaymentLink = async (req, res) => {
       });
     }
 
-    const customer_acount_info = [
+    const customer_account_info = [
       {
         unique_account_identifier: salesOrder.CardCode,
       },
     ];
 
+    const customer_account_info_2 =
+      " { customer_account_info: " + customer_account_info + " }";
+
     //encode it into base 64
     const account_info = Buffer.from(
-      JSON.stringify(customer_acount_info)
+      JSON.stringify(customer_account_info_2)
     ).toString("base64");
 
     console.log("Base 64 code", account_info);

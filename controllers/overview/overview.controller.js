@@ -1,9 +1,9 @@
 // controllers/overviewController.js
-const PurchaseInvoice = require("../models/Purchase");
-const Invoice = require("../models/invoice.model");
-const Payment = require("../models/payment.model");
-const Tag = require("../models/tags.model");
-const Expense = require("../models/expense.model");
+const PurchaseInvoice = require("../../models/Purchase");
+const Invoice = require("../../models/invoice.model");
+const Payment = require("../../models/payment.model");
+const Tag = require("../../models/tags.model");
+const Expense = require("../../models/expense.model");
 
 const overviewController = {
   getOverview: async (req, res) => {

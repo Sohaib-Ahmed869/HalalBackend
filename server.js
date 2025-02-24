@@ -22,7 +22,7 @@ const SalesOrderRoutes = require("./routes/salesOrder.routes");
 const CustomerRoutes = require("./routes/customer.routes");
 const ExpenseRoutes = require("./routes/expense.routes");
 const RolesRoutes = require("./routes/rbac.routes");
-const OverviewController = require("./controllers/overview.controller");
+const OverviewController = require("./routes/overview.routes");
 const PermissionRoutes = require("./routes/permission.routes");
 dotenv.config();
 
@@ -83,7 +83,7 @@ app.use("/api/payment-links", PaymentLinksRoutes);
 app.use("/api/customers", CustomerRoutes);
 app.use("/api/sales-orders", SalesOrderRoutes);
 app.use("/api/expenses", ExpenseRoutes);
-app.use("/api/overview", OverviewController.getOverview);
+app.use("/api/overview",  OverviewController);
 app.use("/api/permissions", PermissionRoutes);
 app.post("/api/verify", (req, res) => {
   console.log(req.body);
