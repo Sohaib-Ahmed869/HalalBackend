@@ -168,13 +168,9 @@ const getSalesOrderWithCustomer = async (req, res) => {
     });
 
     //console log all the order numbers
-    salesOrdersWithCustomer.forEach((order) => {
-      console.log(order.DocNum);
-    });
+    salesOrdersWithCustomer.forEach((order) => {});
 
-    console.log(total);
-
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: salesOrdersWithCustomer.length,
       total,
