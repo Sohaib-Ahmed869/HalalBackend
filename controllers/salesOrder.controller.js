@@ -249,14 +249,17 @@ const generatePaymentLink = async (req, res) => {
       },
     ];
 
+    // Create JSON with string concatenation (without double stringify)
     const customer_account_info_2 =
-      " { customer_account_info: " + customer_account_info + " }";
+      '{"customer_account_info":' + JSON.stringify(customer_account_info) + "}";
 
-    //encode it into base 64
-    const account_info = Buffer.from(
-      JSON.stringify(customer_account_info_2)
-    ).toString("base64");
+    // Encode to base64 directly
+    const account_info = Buffer.from(customer_account_info_2).toString(
+      "base64"
+    );
 
+    console.log(customer_account_info);
+    console.log(customer_account_info_2);
     console.log("Base 64 code", account_info);
 
     // Prepare the payment link request for Adyen
@@ -271,7 +274,6 @@ const generatePaymentLink = async (req, res) => {
       merchantAccount: process.env.ADYEN_MERCHANT_ACCOUNT,
       shopperReference: salesOrder.CardCode,
       additionalData: {
-        manualCapture: "true",
         "openinvoicedata.merchantData": account_info,
       },
 
