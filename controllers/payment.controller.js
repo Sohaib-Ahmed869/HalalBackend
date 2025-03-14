@@ -401,31 +401,36 @@ class PaymentController {
       // Helper function to parse date format DD/MM/YY
       const parseDate = (dateStr) => {
         if (!dateStr) return null;
-        
+
         try {
           // Handle DD/MM/YY format
-          if (typeof dateStr === 'string' && dateStr.includes('/')) {
-            const [day, month, year] = dateStr.split('/').map(num => num.trim());
+          if (typeof dateStr === "string" && dateStr.includes("/")) {
+            const [day, month, year] = dateStr
+              .split("/")
+              .map((num) => num.trim());
             // Ensure all components exist
             if (!day || !month || !year) return null;
-            
+
             // Convert YY to YYYY
             const fullYear = year.length === 2 ? `20${year}` : year;
-            
+
             // Create date string in ISO format (YYYY-MM-DD)
-            const dateString = `${fullYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+            const dateString = `${fullYear}-${month.padStart(
+              2,
+              "0"
+            )}-${day.padStart(2, "0")}`;
             const parsed = new Date(dateString);
-            
+
             // Validate the parsed date
             if (isNaN(parsed.getTime())) return null;
             return parsed;
           }
-          
+
           // If it's already a Date object
           if (dateStr instanceof Date && !isNaN(dateStr.getTime())) {
             return dateStr;
           }
-          
+
           return null;
         } catch (error) {
           console.error(`Error parsing date ${dateStr}:`, error);
@@ -435,7 +440,7 @@ class PaymentController {
 
       // Helper function to clean amount
       const cleanAmount = (amount) => {
-        if (typeof amount === 'number') return amount;
+        if (typeof amount === "number") return amount;
         if (!amount) return 0;
         return parseFloat(amount.toString().replace(/[^\d.-]/g, "")) || 0;
       };
@@ -445,18 +450,18 @@ class PaymentController {
         const workbook = XLSX.readFile(req.file.path, {
           cellDates: true,
           cellNF: true,
-          cellText: false
+          cellText: false,
         });
 
         // Assume first sheet
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        
+
         // Convert to JSON with raw values
         const rows = XLSX.utils.sheet_to_json(worksheet, {
           header: 1,
           raw: true,
-          dateNF: 'dd/mm/yy'
+          dateNF: "dd/mm/yy",
         });
 
         // Skip header row
@@ -466,9 +471,6 @@ class PaymentController {
 
           try {
             // Ensure we have enough columns
-            if (row.length < 14) {
-              throw new Error(`Row ${rowNumber} has insufficient columns`);
-            }
 
             // Map columns according to the actual data structure
             // [index, CreationDate, CardCode, DocNum, CardName, PostingDate, CashAmount, CreditAmount, ChequeAmount, TransferAmount, DocTotal, TransactionNumber, InternalNumber, UserSignature]
@@ -477,11 +479,13 @@ class PaymentController {
 
             // Skip row if crucial dates are invalid
             if (!docDate || !creationDate) {
-              throw new Error(`Invalid dates - DocDate: ${row[5]}, CreationDate: ${row[1]}`);
+              throw new Error(
+                `Invalid dates - DocDate: ${row[5]}, CreationDate: ${row[1]}`
+              );
             }
 
             const payment = {
-              DocEntry: parseInt(row[12]), // Internal Number (index 12)
+              DocEntry: 0,
               DocNum: parseInt(row[3]), // Document Number (index 3)
               DocDate: docDate,
               CardCode: row[2], // Customer/Supplier No. (index 2)
@@ -493,15 +497,10 @@ class PaymentController {
               DocTotal: cleanAmount(row[10]), // Document Total (index 10)
               CreationDate: creationDate,
               TransactionNumber: row[11]?.toString(), // Transaction Number (index 11)
-              UserSignature: row[13]?.toString(), // User Signature (index 13)
+              UserSignature: 0,
               verified: false,
-              dateStored: new Date()
+              dateStored: new Date(),
             };
-
-            // Validate required fields
-            if (!payment.DocEntry || !payment.DocNum) {
-              throw new Error(`Missing required fields - DocEntry: ${payment.DocEntry}, DocNum: ${payment.DocNum}`);
-            }
 
             records.push(payment);
 
@@ -516,9 +515,9 @@ class PaymentController {
             errors.push({
               row: {
                 rowNumber,
-                data: row
+                data: row,
               },
-              error: error.message
+              error: error.message,
             });
           }
         }
@@ -530,7 +529,7 @@ class PaymentController {
         }
 
         // Clean up uploaded file
-        const fs = require('fs');
+        const fs = require("fs");
         fs.unlink(req.file.path, (err) => {
           if (err) console.error("Error deleting file:", err);
         });
@@ -539,25 +538,23 @@ class PaymentController {
           message: "Excel processing completed",
           stats: {
             totalProcessed,
-            errorsCount: errors.length
+            errorsCount: errors.length,
           },
-          errors: errors.length > 0 ? errors.slice(0, 10) : undefined
+          errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
         });
-
       } catch (error) {
         throw new Error(`Error processing Excel file: ${error.message}`);
       }
-
     } catch (error) {
       console.error("Error processing Excel:", error);
       if (req.file && req.file.path) {
-        const fs = require('fs');
+        const fs = require("fs");
         fs.unlink(req.file.path, (err) => {
           if (err) console.error("Error deleting file:", err);
         });
       }
-      res.status(500).json({ 
-        error: error.message || "Failed to process Excel file" 
+      res.status(500).json({
+        error: error.message || "Failed to process Excel file",
       });
     }
   }

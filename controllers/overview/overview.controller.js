@@ -4,11 +4,41 @@ const Invoice = require("../../models/invoice.model");
 const Payment = require("../../models/payment.model");
 const Tag = require("../../models/tags.model");
 const Expense = require("../../models/expense.model");
+const { processTagFilter } = require("../../utils/filterHelper");
+// Create a utility function to process tag filter
+const buildTagFilter = (tags) => {
+  if (!tags) return {};
 
+  // Parse comma-separated tags
+  const tagArray = tags.split(",");
+
+  if (tagArray.length === 0) return {};
+
+  const orConditions = [];
+
+  // Special case for POS
+  if (tagArray.includes("POS")) {
+    orConditions.push({ U_EPOSNo: { $ne: null } }, { CardCode: "C9999" });
+  }
+
+  // Handle the standard tags
+  const standardTags = tagArray.filter((tag) => tag !== "POS");
+  if (standardTags.length > 0) {
+    orConditions.push({ tag: { $in: standardTags } });
+  }
+
+  // Return the filter if there are conditions
+  if (orConditions.length > 0) {
+    return { $or: orConditions };
+  }
+
+  return {};
+};
 const overviewController = {
   getOverview: async (req, res) => {
     try {
-      const { startDate, endDate } = req.query;
+      const { startDate, endDate, tags } = req.query;
+
       const dateFilter = {
         DocDate: {
           $gte: new Date(startDate),
@@ -16,9 +46,18 @@ const overviewController = {
         },
       };
 
+      // Add tag filter if present
+      const tagFilter = buildTagFilter(tags);
+
+      // Combine filters
+      const combinedFilter = {
+        ...dateFilter,
+        ...(Object.keys(tagFilter).length > 0 ? tagFilter : {}),
+      };
+
       // 1. Purchases by Tags
       const purchasesByTags = await PurchaseInvoice.aggregate([
-        { $match: dateFilter },
+        { $match: combinedFilter },
         {
           $group: {
             _id: { tag: { $ifNull: ["$tags", "Untagged"] } },
@@ -48,7 +87,7 @@ const overviewController = {
 
       // 2. Sales by Clients with division by zero protection
       const salesByClients = await Invoice.aggregate([
-        { $match: dateFilter },
+        { $match: combinedFilter },
         {
           $group: {
             _id: {
@@ -65,6 +104,7 @@ const overviewController = {
               },
             },
             netSales: { $sum: "$DocTotal" },
+
             grossProfit: {
               $sum: {
                 $subtract: [
@@ -121,7 +161,7 @@ const overviewController = {
       ]);
       // 3. Sales by Products with division by zero protection
       const salesByProducts = await Invoice.aggregate([
-        { $match: dateFilter },
+        { $match: combinedFilter },
         { $unwind: "$DocumentLines" },
         {
           $group: {
@@ -179,7 +219,7 @@ const overviewController = {
       const periodOverview = await Promise.all([
         // Total Sales
         Invoice.aggregate([
-          { $match: dateFilter },
+          { $match: combinedFilter },
           {
             $group: {
               _id: null,

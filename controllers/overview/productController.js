@@ -1,14 +1,14 @@
 // controllers/productController.js
 const Invoice = require("../../models/invoice.model");
 const mongoose = require("mongoose");
-
+const { processTagFilter } = require("../../utils/filterHelper");
 const productController = {
   /**
    * Get product analytics with sales information
    */
   getProductAnalytics: async (req, res) => {
     try {
-      const { startDate, endDate } = req.query;
+      const { startDate, endDate, tags } = req.query;
       const dateFilter = {
         DocDate: {
           $gte: new Date(startDate),
@@ -16,9 +16,18 @@ const productController = {
         },
       };
 
+      // Add tag filter if present
+      const tagFilter = processTagFilter(tags);
+
+      // Combine filters
+      const combinedFilter = {
+        ...dateFilter,
+        ...(Object.keys(tagFilter).length > 0 ? tagFilter : {}),
+      };
+
       // Get aggregated product data with sales metrics
       const productsWithSales = await Invoice.aggregate([
-        { $match: dateFilter },
+        { $match: combinedFilter },
         { $unwind: "$DocumentLines" },
         {
           $group: {
@@ -92,7 +101,7 @@ const productController = {
   getProductOrderHistory: async (req, res) => {
     try {
       const { productCode } = req.params;
-      const { page = 1, limit = 10, startDate, endDate } = req.query;
+      const { page = 1, limit = 10, startDate, endDate, tags } = req.query;
 
       const dateFilter = {};
       if (startDate && endDate) {
@@ -102,11 +111,20 @@ const productController = {
         };
       }
 
+      // Add tag filter if present
+      const tagFilter = processTagFilter(tags);
+
+      // Combine filters
+      const combinedFilter = {
+        ...dateFilter,
+        ...(Object.keys(tagFilter).length > 0 ? tagFilter : {}),
+      };
+
       // Find all invoices that contain the product
       const productOrderHistory = await Invoice.aggregate([
         {
           $match: {
-            ...dateFilter,
+            ...combinedFilter,
             "DocumentLines.ItemCode": productCode,
           },
         },

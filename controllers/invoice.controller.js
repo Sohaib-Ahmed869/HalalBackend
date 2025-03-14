@@ -8,7 +8,6 @@ const Return = require("../models/returns.model");
 class InvoiceController {
   static async getInvoices(req, res) {
     try {
-      console.log("Query:", req.query);
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 100;
       const sortField = req.query.sortField || "CreationDate";
@@ -327,14 +326,6 @@ class InvoiceController {
       console.log("Tag:", tag);
       console.log("DocEntry:", DocEntry);
 
-      if (
-        !["Own Company", "Cash and Carry", "Delivery", "None"].includes(tag)
-      ) {
-        return res.status(400).json({
-          error: "Invalid tag value",
-        });
-      }
-
       const invoice = await Invoice.findOneAndUpdate(
         { DocEntry },
         { tag },
@@ -573,8 +564,6 @@ class InvoiceController {
             vatGroup: line.VatGroup,
           })) || [],
       }));
-
-   
 
       res.json({
         success: true,
@@ -895,7 +884,7 @@ class InvoiceController {
   static async getCustomerInvoices(req, res) {
     try {
       const { cardCode, status } = req.query;
-      console.log("Query:", req.query);
+
       if (!cardCode) {
         return res.status(400).json({
           error: "Customer name is required",

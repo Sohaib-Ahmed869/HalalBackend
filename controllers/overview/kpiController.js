@@ -3,7 +3,9 @@ const Invoice = require("../../models/invoice.model");
 const PurchaseInvoice = require("../../models/Purchase");
 const Payment = require("../../models/payment.model");
 const Expense = require("../../models/expense.model");
+const { processTagFilter } = require("../../utils/filterHelper");
 
+// Define date filter for all queries
 const enhancedKpiController = {
   /**
    * Get enhanced KPIs including:
@@ -15,7 +17,7 @@ const enhancedKpiController = {
    */
   getEnhancedKpis: async (req, res) => {
     try {
-      const { startDate, endDate, previousStartDate, previousEndDate } =
+      const { startDate, endDate, previousStartDate, previousEndDate, tags } =
         req.query;
 
       // Validate date ranges
@@ -24,16 +26,19 @@ const enhancedKpiController = {
           .status(400)
           .json({ message: "Start and end dates are required" });
       }
-
       // Set up date filters
-      const currentPeriodFilter = {
+      const dateFilter = {
         DocDate: {
           $gte: new Date(startDate),
           $lte: new Date(endDate),
         },
       };
 
-      // Previous period filter for comparison (if provided)
+      const tagFilter = processTagFilter(tags);
+      const currentPeriodFilter = {
+        ...dateFilter,
+        ...(Object.keys(tagFilter).length > 0 ? tagFilter : {}),
+      }; // Previous period filter for comparison (if provided)
       const previousPeriodFilter =
         previousStartDate && previousEndDate
           ? {
@@ -41,9 +46,9 @@ const enhancedKpiController = {
                 $gte: new Date(previousStartDate),
                 $lte: new Date(previousEndDate),
               },
+              ...(Object.keys(tagFilter).length > 0 ? tagFilter : {}),
             }
           : null;
-
       // Execute all queries in parallel for better performance
       const [
         currentPeriodSales,
@@ -421,7 +426,7 @@ const enhancedKpiController = {
    */
   getCashFlowAnalytics: async (req, res) => {
     try {
-      const { startDate, endDate, groupBy = "month" } = req.query;
+      const { startDate, endDate, groupBy = "month", tags } = req.query;
 
       // Validate inputs
       if (!startDate || !endDate) {
@@ -433,6 +438,22 @@ const enhancedKpiController = {
       // Define grouping format based on user selection
       let groupFormat;
       let dateFormat;
+
+      // Create date filter
+      const dateFilter = {
+        DocDate: {
+          $gte: new Date(startDate),
+          $lte: new Date(endDate),
+        },
+      };
+      // Process tag filter
+      const tagFilter = processTagFilter(tags);
+
+      // Combine filters
+      const combinedFilter = {
+        ...dateFilter,
+        ...(Object.keys(tagFilter).length > 0 ? tagFilter : {}),
+      };
 
       switch (groupBy) {
         case "day":
@@ -524,12 +545,7 @@ const enhancedKpiController = {
         // Income (payments received)
         Payment.aggregate([
           {
-            $match: {
-              DocDate: {
-                $gte: new Date(startDate),
-                $lte: new Date(endDate),
-              },
-            },
+            $match: combinedFilter,
           },
           {
             $group: {
@@ -555,12 +571,7 @@ const enhancedKpiController = {
           // Purchases
           PurchaseInvoice.aggregate([
             {
-              $match: {
-                DocDate: {
-                  $gte: new Date(startDate),
-                  $lte: new Date(endDate),
-                },
-              },
+              $match: combinedFilter,
             },
             {
               $group: {

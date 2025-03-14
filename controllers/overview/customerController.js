@@ -2,7 +2,7 @@
 const Invoice = require("../../models/invoice.model");
 const Payment = require("../../models/payment.model");
 const mongoose = require("mongoose");
-
+const { processTagFilter } = require("../../utils/filterHelper");
 const customerController = {
   /**
    * Get customer list with summary metrics
@@ -16,6 +16,7 @@ const customerController = {
         limit = 10,
         sortBy = "totalPurchases",
         sortOrder = "desc",
+        tags,
       } = req.query;
 
       const dateFilter = {};
@@ -26,13 +27,21 @@ const customerController = {
         };
       }
 
+      const tagFilter = processTagFilter(tags);
+
+      // Combine filters
+      const combinedFilter = {
+        ...dateFilter,
+        ...(Object.keys(tagFilter).length > 0 ? tagFilter : {}),
+      };
+
       // Sort configuration
       const sortOptions = {};
       sortOptions[sortBy] = sortOrder === "desc" ? -1 : 1;
 
       // Get aggregated customer data with purchase metrics
       const customersData = await Invoice.aggregate([
-        { $match: dateFilter },
+        { $match: combinedFilter },
         {
           $group: {
             _id: {
@@ -128,7 +137,7 @@ const customerController = {
   getCustomerJourney: async (req, res) => {
     try {
       const { customerCode } = req.params;
-      const { page = 1, limit = 10, startDate, endDate } = req.query;
+      const { page = 1, limit = 10, startDate, endDate, tags } = req.query;
 
       const dateFilter = { CardCode: customerCode };
       if (startDate && endDate) {
@@ -138,8 +147,16 @@ const customerController = {
         };
       }
 
+      const tagFilter = processTagFilter(tags);
+
+      // Combine filters
+      const combinedFilter = {
+        ...dateFilter,
+        ...(Object.keys(tagFilter).length > 0 ? tagFilter : {}),
+      };
+
       // Get all invoices for the specified customer
-      const invoices = await Invoice.find(dateFilter)
+      const invoices = await Invoice.find(combinedFilter)
         .sort({ DocDate: -1 })
         .skip((parseInt(page) - 1) * parseInt(limit))
         .limit(parseInt(limit))
@@ -155,7 +172,7 @@ const customerController = {
         });
 
       // Get count for pagination
-      const totalInvoices = await Invoice.countDocuments(dateFilter);
+      const totalInvoices = await Invoice.countDocuments(combinedFilter);
 
       // Get customer summary metrics
       const customerSummary = await Invoice.aggregate([

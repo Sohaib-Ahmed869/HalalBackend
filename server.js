@@ -83,7 +83,7 @@ app.use("/api/payment-links", PaymentLinksRoutes);
 app.use("/api/customers", CustomerRoutes);
 app.use("/api/sales-orders", SalesOrderRoutes);
 app.use("/api/expenses", ExpenseRoutes);
-app.use("/api/overview",  OverviewController);
+app.use("/api/overview", OverviewController);
 app.use("/api/permissions", PermissionRoutes);
 app.post("/api/verify", (req, res) => {
   console.log(req.body);

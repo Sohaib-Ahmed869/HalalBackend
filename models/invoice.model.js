@@ -13,7 +13,7 @@ const invoiceSchema = new mongoose.Schema(
     },
     tag: {
       type: String,
-      enum: ["Own Company", "Cash and Carry", "Delivery", "None"],
+      enum: ["Own Company", "External Delivery", "Own Delivery", "None"],
       default: "None",
     },
     paymentMethod: {
