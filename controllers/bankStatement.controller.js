@@ -3,6 +3,8 @@ const XLSX = require("xlsx");
 const fs = require("fs");
 const pdfParse = require("pdf-parse");
 const { parse } = require("ofx-parser");
+const axios = require("axios");
+const FormData = require("form-data");
 
 /**
  * Bank Statement Processor Module
@@ -30,7 +32,8 @@ class BankStatementController {
         if (fileType === "pdf") {
           formattedData = await BankStatementController.processPDF(
             buffer,
-            bankName
+            bankName,
+            req.file.originalname
           );
         } else if (fileType === "xlsx" || fileType === "xls") {
           formattedData = await BankStatementController.processExcel(
@@ -80,11 +83,11 @@ class BankStatementController {
 
       // Store valid transactions in the database
       const result = await BankStatement.insertMany(formattedData);
-      console.log("Transactions inserted successfully", result);
+      console.log("Transactions inserted successfully", formattedData.length);
 
       res.status(200).json({
         message: "Bank statement uploaded successfully",
-        count: 10,
+        count: result.length,
       });
     } catch (error) {
       console.error("Upload error:", error.message);
@@ -94,428 +97,165 @@ class BankStatementController {
   }
 
   /**
-   * Process PDF bank statements
+   * Process PDF bank statements by sending to Python API
    */
-  static async processPDF(buffer, bankName) {
+  static async processPDF(buffer, bankName, fileName) {
     try {
-      const pdfData = await pdfParse(buffer);
-      console.log("Raw PDF text length:", pdfData.text.length);
-
-      let transactions = [];
-
-      if (pdfData.text.includes("BRED Banque Populaire")) {
-        console.log("Detected BRED bank statement");
-        transactions =
-          await BankStatementController.extractTransactionsFromBREDPDF(
-            pdfData.text
-          );
-      } else if (pdfData.text.includes("Société Générale")) {
-        console.log("Detected Société Générale bank statement");
-        transactions =
-          await BankStatementController.extractTransactionsFromSGPDF(
-            pdfData.text
-          );
-      } else {
-        console.log("Using generic PDF transaction extraction");
-        transactions =
-          await BankStatementController.extractTransactionsFromGenericPDF(
-            pdfData.text
-          );
-      }
-
-      return transactions.map((t) => {
-        let operationDate = BankStatementController.parseDate(t.date);
-        let amount = BankStatementController.parseAmount(t.amount);
-        if (t.debit > 0) amount = -t.debit;
-        if (t.credit > 0) amount = t.credit;
-
-        return {
-          operationDate,
-          operationRef: t.reference || "",
-          operationType: t.type || "AUTRE",
-          amount,
-          comment: t.description || "",
-          bank: bankName,
-        };
+      // Create form data for file upload to Python API
+      const formData = new FormData();
+      formData.append("file", buffer, {
+        filename: fileName || "statement.pdf",
+        contentType: "application/pdf",
       });
+
+      console.log("Sending PDF to Python API for processing");
+
+      // Send request to Python API
+      const response = await axios.post(
+        "http://127.0.0.1:5000/process",
+        formData,
+        {
+          headers: {
+            ...formData.getHeaders(),
+          },
+          timeout: 30000, // 30 seconds timeout
+        }
+      );
+
+      console.log("Received response from Python API");
+
+      if (
+        !response.data ||
+        !response.data.transactions ||
+        !Array.isArray(response.data.transactions)
+      ) {
+        throw new Error("Invalid response format from Python API");
+      }
+
+      // Transform data from Python API format to match our MongoDB model
+      return BankStatementController.transformPythonResponseToModel(
+        response.data,
+        bankName
+      );
     } catch (error) {
-      console.error("PDF processing error:", error);
-      throw new Error(`PDF processing error: ${error.message}`);
+      console.error("Error communicating with Python API:", error);
+
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        console.error("Python API error response:", error.response.data);
+        throw new Error(
+          `Python API error: ${error.response.data.error || "Unknown error"}`
+        );
+      } else if (error.request) {
+        // The request was made but no response was received
+        throw new Error(
+          "Python API did not respond. Make sure the Python server is running on port 5000"
+        );
+      } else {
+        // Something happened in setting up the request
+        throw new Error(
+          `Error setting up request to Python API: ${error.message}`
+        );
+      }
     }
   }
 
   /**
-   * Extract transactions from BRED bank PDF statement
+   * Transform Python API response to match our MongoDB model
    */
-  /**
-   * Properly extract transactions from BRED bank PDF statement
-   */
-  static async extractTransactionsFromBREDPDF(text) {
-    const transactions = [];
-    const lines = text
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-
-    let currentTransaction = null;
-    let currentDescription = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const dateMatch = line.match(/(\d{2})\.(\d{2})\.(\d{4})/);
-      const amountMatch = line.match(/([\d\s]+[,.]\d{2})/g);
-
-      if (dateMatch) {
-        if (currentTransaction) {
-          currentTransaction.description = currentDescription.join(" ").trim();
-          transactions.push(currentTransaction);
-        }
-
-        currentTransaction = {
-          date: `${dateMatch[1]}/${dateMatch[2]}/${dateMatch[3]}`,
-          type: "AUTRE",
-          amount: 0,
-          description: "",
-        };
-        currentDescription = [line];
-      } else if (currentTransaction) {
-        currentDescription.push(line);
-        if (amountMatch) {
-          let amount = BankStatementController.parseAmount(amountMatch[0]);
-          if (
-            line.toLowerCase().includes("debit") ||
-            line.toLowerCase().includes("prélèvement")
-          ) {
-            currentTransaction.amount = -amount;
-          } else {
-            currentTransaction.amount = amount;
-          }
-        }
-      }
-    }
-    if (currentTransaction) {
-      currentTransaction.description = currentDescription.join(" ").trim();
-      transactions.push(currentTransaction);
-    }
-    return transactions;
-  }
-
-  /**
-   * Parses amounts correctly, handling European format (1.234,56 -> 1234.56)
-   */
-  static parseAmount(amountStr) {
-    if (!amountStr) return 0;
-    let cleanStr = amountStr
-      .replace(/\s+/g, "")
-      .replace(/\./g, "")
-      .replace(",", ".");
-    return parseFloat(cleanStr) || 0;
-  }
-
-  /**
-   * Parses dates from various formats
-   */
-  static parseDate(dateStr) {
-    if (!dateStr) return new Date();
-    const match = dateStr.match(/(\d{2})[\.\/-](\d{2})[\.\/-](\d{4})/);
-    return match ? new Date(`${match[3]}-${match[2]}-${match[1]}`) : new Date();
-  }
-  /**
-   * Extract transactions from Société Générale PDF statement
-   */
-  static async extractTransactionsFromSGPDF(text) {
-    const transactions = [];
-    const lines = text
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-
-    console.log("Sample of Société Générale PDF text lines:");
-    lines
-      .slice(0, 10)
-      .forEach((line, idx) => console.log(`Line ${idx}: ${line}`));
-
-    let inTransactionSection = false;
-    let currentTransaction = null;
-    let descriptionLines = [];
-
-    // Find the start of the RELEVÉ DES OPÉRATIONS section
-    let transactionSectionStart = lines.findIndex((line) =>
-      line.includes("RELEVÉ DES OPÉRATIONS")
-    );
-
-    if (transactionSectionStart === -1) {
-      // Alternative: look for "Date Valeur Nature de l'opération"
-      transactionSectionStart = lines.findIndex((line) =>
-        line.match(/Date\s+Valeur\s+Nature de l'opération/)
-      );
-    }
-
-    if (transactionSectionStart !== -1) {
-      console.log(
-        `Found SG transactions section at line ${transactionSectionStart}`
-      );
-      // Skip the header lines
-      transactionSectionStart += 2;
-    } else {
-      console.log(
-        "Could not identify SG transaction section, processing all lines"
-      );
-      transactionSectionStart = 0;
-    }
-
-    for (let i = transactionSectionStart; i < lines.length; i++) {
-      const line = lines[i];
-
-      // Check for end of transactions section
-      if (
-        line.includes("TOTAUX DES MOUVEMENTS") ||
-        line.includes("NOUVEAU SOLDE")
-      ) {
-        if (currentTransaction) {
-          currentTransaction.description = descriptionLines.join(" ").trim();
-          transactions.push(currentTransaction);
-          currentTransaction = null;
-          descriptionLines = [];
-        }
-        break;
-      }
-
-      // For SG, transactions often start with a date in DD/MM/YYYY format
-      const dateMatch = line.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-
-      if (dateMatch && i < lines.length - 1) {
-        // Save the previous transaction if exists
-        if (currentTransaction) {
-          currentTransaction.description = descriptionLines.join(" ").trim();
-          transactions.push(currentTransaction);
-          descriptionLines = [];
-        }
-
-        const day = dateMatch[1];
-        const month = dateMatch[2];
-        const year = dateMatch[3];
-
-        // Get the rest of the line (after the date) as description
-        const descriptionStart =
-          line.indexOf(dateMatch[0]) + dateMatch[0].length;
-        let description = line.substring(descriptionStart).trim();
-
-        // Process next line which should contain either "Débit" or "Crédit" amount
-        const nextLine = lines[i + 1].trim();
-        let debit = 0;
-        let credit = 0;
-
-        // Look for amount which is usually in format like "1.234,56" or "1 234,56"
-        const amountMatch = nextLine.match(/(\d{1,3}(?:[\s\.]\d{3})*,\d{2})/);
-
-        if (amountMatch) {
-          const amount = BankStatementController.parseAmount(amountMatch[1]);
-
-          // Determine if debit or credit based on the line content
-          if (
-            nextLine.includes("VIR INSTANTANE EMIS") ||
-            nextLine.includes("VIR EUROPEEN EMIS") ||
-            nextLine.includes("PRELEVEMENT") ||
-            nextLine.includes("CARTE") ||
-            nextLine.includes("FRAIS") ||
-            nextLine.includes("COMMISSION")
-          ) {
-            debit = amount;
-          } else {
-            credit = amount;
-          }
-
-          // Add the rest of the next line to description
-          const nextLineDescStart =
-            nextLine.indexOf(amountMatch[1]) + amountMatch[1].length;
-          description += " " + nextLine.substring(nextLineDescStart).trim();
-
-          // Skip the next line as we've already processed it
-          i++;
-        }
-
-        // Determine operation type
-        const operationType =
-          BankStatementController.determineOperationType(description);
-
-        // Extract reference (often formatted as "REF: XXXXX" in SG statements)
-        const refMatch = description.match(/REF[:\s]+([^,\s]+)/i);
-        const reference = refMatch ? refMatch[1] : "";
-
-        // Extract beneficiary
-        const beneficiaryMatch =
-          description.match(/POUR:\s+([^,]+)/i) ||
-          description.match(/DE:\s+([^,]+)/i);
-        const beneficiary = beneficiaryMatch ? beneficiaryMatch[1].trim() : "";
-
-        currentTransaction = {
-          date: `${day}/${month}/${year}`,
-          type: operationType,
-          debit: debit,
-          credit: credit,
-          description: description,
-          reference: reference,
-          beneficiary: beneficiary,
-          raw: line + " " + nextLine,
-        };
-
-        descriptionLines = [description];
-      } else if (currentTransaction) {
-        // Add this line to the current transaction's description
-        descriptionLines.push(line);
-
-        // Check for additional reference information
-        const refMatch = line.match(/REF[:\s]+([^,\s]+)/i);
-        if (refMatch && !currentTransaction.reference) {
-          currentTransaction.reference = refMatch[1];
-        }
-
-        // Check for beneficiary information
-        const beneficiaryMatch =
-          line.match(/POUR:\s+([^,]+)/i) || line.match(/DE:\s+([^,]+)/i);
-        if (beneficiaryMatch && !currentTransaction.beneficiary) {
-          currentTransaction.beneficiary = beneficiaryMatch[1].trim();
-        }
-      }
-    }
-
-    // Don't forget the last transaction
-    if (currentTransaction) {
-      currentTransaction.description = descriptionLines.join(" ").trim();
-      transactions.push(currentTransaction);
-    }
-
-    console.log(`Extracted ${transactions.length} transactions from SG PDF`);
-
-    return transactions;
-  }
-
-  /**
-   * Generic PDF transaction extraction as fallback
-   */
-  static async extractTransactionsFromGenericPDF(text) {
-    // This is a simplified fallback extraction that tries to identify
-    // transaction data in any format
-    const transactions = [];
-    const lines = text
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-
-    console.log("Using generic PDF extraction");
-
-    // Look for patterns that might indicate transaction data
-    // This is a simple approach and may need refinement based on actual statements
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-
-      // Skip lines that are likely headers or footers
-      if (
-        line.length < 10 ||
-        line.match(/page|total|solde|balance|header|footer/i)
-      ) {
-        continue;
-      }
-
-      // Look for date patterns (DD/MM/YYYY, DD.MM.YYYY, YYYY-MM-DD)
-      const dateMatch =
-        line.match(/(\d{2})[\/\.](\d{2})[\/\.](\d{4})/) ||
-        line.match(/(\d{4})-(\d{2})-(\d{2})/);
-
-      if (dateMatch) {
-        // Look for amount patterns in the same line or next few lines
-        let amountFound = false;
-        let debit = 0;
-        let credit = 0;
-        let description = line;
-
-        // Search in current line and next 3 lines for amount
-        for (let j = 0; j <= 3 && i + j < lines.length; j++) {
-          const searchLine = lines[i + j];
-
-          // Look for amount patterns (with decimal comma or period)
-          const amountMatches = searchLine.match(/(\d+[\s\.]?\d*[,\.]\d{2})/g);
-
-          if (amountMatches) {
-            amountFound = true;
-
-            // Simple heuristic: If we find one amount, check context to determine debit/credit
-            // If we find two amounts, assume first is debit, second is credit
-            if (amountMatches.length === 1) {
-              const amount = BankStatementController.parseAmount(
-                amountMatches[0]
-              );
-
-              // Look for keywords indicating debit or credit
-              if (searchLine.match(/debit|payment|withdrawal|fee|charge/i)) {
-                debit = amount;
-              } else if (
-                searchLine.match(/credit|deposit|interest|received/i)
-              ) {
-                credit = amount;
-              } else {
-                // Default: positive numbers are credits, negative are debits
-                if (amount < 0) {
-                  debit = Math.abs(amount);
-                } else {
-                  credit = amount;
-                }
-              }
-            } else if (amountMatches.length >= 2) {
-              debit = BankStatementController.parseAmount(amountMatches[0]);
-              credit = BankStatementController.parseAmount(amountMatches[1]);
-            }
-
-            // Add more content to description
-            if (j > 0) {
-              description += " " + searchLine;
-            }
-
-            break;
-          }
-        }
-
-        if (amountFound) {
-          // Format date based on the match pattern
-          let dateString;
-
-          if (dateMatch[0].includes("/") || dateMatch[0].includes(".")) {
-            // DD/MM/YYYY or DD.MM.YYYY format
-            const day = dateMatch[1];
-            const month = dateMatch[2];
-            const year = dateMatch[3];
-            dateString = `${day}/${month}/${year}`;
-          } else {
-            // YYYY-MM-DD format
-            const year = dateMatch[1];
-            const month = dateMatch[2];
-            const day = dateMatch[3];
-            dateString = `${day}/${month}/${year}`;
-          }
-
-          const operationType =
-            BankStatementController.determineOperationType(description);
-
-          transactions.push({
-            date: dateString,
-            type: operationType,
-            debit: debit,
-            credit: credit,
-            description: description,
-            reference: "",
-            beneficiary: "",
-            raw: line,
-          });
-        }
-      }
-    }
+  static transformPythonResponseToModel(pythonData, bankName) {
+    const { transactions, header } = pythonData;
 
     console.log(
-      `Extracted ${transactions.length} transactions from generic PDF`
+      `Transforming ${transactions.length} transactions from Python API`
     );
 
-    return transactions;
+    return transactions.map((transaction) => {
+      // Parse date from Python response (format: "DD.MM" or "DD.MM.YY")
+      let operationDate = new Date();
+      if (transaction.date) {
+        const dateParts = transaction.date.split(".");
+        if (dateParts.length >= 2) {
+          const currentYear = new Date().getFullYear();
+          const month = parseInt(dateParts[1], 10) - 1; // JS months are 0-indexed
+          const day = parseInt(dateParts[0], 10);
+
+          // If year is provided in the date (DD.MM.YY or DD.MM.YYYY)
+          if (dateParts.length > 2) {
+            let year = parseInt(dateParts[2], 10);
+            // Handle 2-digit years
+            if (year < 100) {
+              year = year < 50 ? 2000 + year : 1900 + year;
+            }
+            operationDate = new Date(year, month, day);
+          } else {
+            // If no year, use current year
+            operationDate = new Date(currentYear, month, day);
+          }
+        }
+      }
+
+      // Handle effective date (valeur) if present
+      let effectiveDate = null;
+      if (transaction.valeur) {
+        const dateParts = transaction.valeur.split(".");
+        if (dateParts.length >= 2) {
+          let year = new Date().getFullYear();
+          if (dateParts.length > 2) {
+            year = parseInt(dateParts[2], 10);
+            if (year < 100) {
+              year = year < 50 ? 2000 + year : 1900 + year;
+            }
+          }
+          effectiveDate = new Date(
+            year,
+            parseInt(dateParts[1], 10) - 1,
+            parseInt(dateParts[0], 10)
+          );
+        }
+      }
+
+      // Calculate amount (credit is positive, debit is negative)
+      let amount = 0;
+      if (transaction.credit && transaction.credit.trim() !== "") {
+        amount = BankStatementController.parseAmount(transaction.credit);
+      } else if (transaction.debit && transaction.debit.trim() !== "") {
+        amount = -BankStatementController.parseAmount(transaction.debit);
+      }
+
+      // Determine operation type
+      const operationType = BankStatementController.determineOperationType(
+        transaction.reference || ""
+      );
+
+      // Extract beneficiary if possible
+      const beneficiary = BankStatementController.extractBeneficiary(
+        transaction.reference || ""
+      );
+
+      // Return object matching our MongoDB model
+      return {
+        operationDate,
+        operationRef: transaction.reference
+          ? transaction.reference.substring(0, 100)
+          : "",
+        operationType,
+        amount,
+        comment: transaction.raw || transaction.reference || "",
+        detail1: beneficiary || "",
+        detail2: transaction.date || "",
+        detail3: transaction.valeur || "",
+        detail4: header?.account_number || "",
+        detail5: header?.statement_date || "",
+        bank: bankName,
+        uploadDate: new Date(),
+        tag: null,
+        taggedBy: null,
+        taggedAt: null,
+        tagNotes: null,
+      };
+    });
   }
 
   /**
