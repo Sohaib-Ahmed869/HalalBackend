@@ -173,25 +173,39 @@ class BankStatementController {
 
     return transactions.map((transaction) => {
       // Parse date from Python response (format: "DD.MM" or "DD.MM.YY")
+      // Parse date from Python response (format: "DD.MM" or "DD.MM.YY")
       let operationDate = new Date();
       if (transaction.date) {
         const dateParts = transaction.date.split(".");
         if (dateParts.length >= 2) {
-          const currentYear = new Date().getFullYear();
+          // Extract statement date from header to get the year
+          let year = new Date().getFullYear() - 1; // Default to previous year as fallback
+
+          // Try to extract year from statement date if available
+          if (header && header.statement_date) {
+            const statementDateMatch = header.statement_date.match(/\d{4}$/);
+            if (statementDateMatch) {
+              year = parseInt(statementDateMatch[0], 10);
+            }
+          }
+
           const month = parseInt(dateParts[1], 10) - 1; // JS months are 0-indexed
           const day = parseInt(dateParts[0], 10);
 
           // If year is provided in the date (DD.MM.YY or DD.MM.YYYY)
           if (dateParts.length > 2) {
-            let year = parseInt(dateParts[2], 10);
+            let transactionYear = parseInt(dateParts[2], 10);
             // Handle 2-digit years
-            if (year < 100) {
-              year = year < 50 ? 2000 + year : 1900 + year;
+            if (transactionYear < 100) {
+              transactionYear =
+                transactionYear < 50
+                  ? 2000 + transactionYear
+                  : 1900 + transactionYear;
             }
-            operationDate = new Date(year, month, day);
+            operationDate = new Date(transactionYear, month, day);
           } else {
-            // If no year, use current year
-            operationDate = new Date(currentYear, month, day);
+            // If no year in transaction date, use year from statement date
+            operationDate = new Date(year, month, day);
           }
         }
       }
