@@ -247,7 +247,7 @@ const generatePaymentLink = async (req, res) => {
 
     // Create JSON with string concatenation (without double stringify)
     const customer_account_info_2 =
-      '{"customer_account_info":' + JSON.stringify(customer_account_info) + "}";
+      '{"payment_history_simple":' + JSON.stringify(customer_account_info) + "}";
 
     // Encode to base64 directly
     const account_info = Buffer.from(customer_account_info_2).toString(
