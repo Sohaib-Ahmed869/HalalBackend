@@ -718,7 +718,6 @@ const checkOrderStatus = async (req, res) => {
   try {
     // Configuration options
     const BATCH_SIZE = 20; // SAP's recommended maximum batch size
-    const MAX_BATCHES_PER_RUN = 20; // Limit the total number of batches per run to avoid timeouts
 
     console.log("Starting optimized order status check...");
 
@@ -729,6 +728,8 @@ const checkOrderStatus = async (req, res) => {
 
     // Count total orders that need checking
     const totalOrdersToCheck = await SalesOrder.countDocuments(query);
+
+    const MAX_BATCHES_PER_RUN = totalOrdersToCheck / BATCH_SIZE;
 
     if (totalOrdersToCheck === 0) {
       return res.status(200).json({
