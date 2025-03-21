@@ -50,6 +50,12 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
 const bodyParser = require("body-parser");
 app.use(bodyParser.json({ limit: "100mb" }));
 app.use(bodyParser.urlencoded({ limit: "100mb", extended: true }));
+app.use((req, res, next) => {
+  // Extend the timeout for all requests
+  req.setTimeout(600000); // 10 minutes
+  res.setTimeout(600000); // 10 minutes
+  next();
+});
 
 app.get("/", (req, res) => {
   res.send("Hello World from Halal Foods!");

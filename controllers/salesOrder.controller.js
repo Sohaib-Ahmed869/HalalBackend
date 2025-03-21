@@ -187,43 +187,55 @@ const getSalesOrderWithCustomer = async (req, res) => {
   }
 };
 
-const loginToSAP = async () => {
-  try {
-    const loginData = {
-      CompanyDB: process.env.COMPANY_DB,
-      UserName: process.env.USER_NAME,
-      Password: process.env.PASSWORD,
-    };
-    console.log(loginData);
+const loginToSAP = async (retries = 3, delay = 5000) => {
+  let lastError;
 
-    console.log("Attempting to login to SAP...");
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      console.log(`SAP login attempt ${attempt}/${retries}...`);
 
-    const response = await axios.post(
-      `${process.env.BASE_URL}/Login`,
-      loginData,
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
+      const loginData = {
+        CompanyDB: process.env.COMPANY_DB,
+        UserName: process.env.USER_NAME,
+        Password: process.env.PASSWORD,
+      };
+
+      const response = await axios.post(
+        `${process.env.BASE_URL}/Login`,
+        loginData,
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+          timeout: 20000, // 20 second timeout for login
+        }
+      );
+
+      const cookies = response.headers["set-cookie"];
+      if (!cookies) {
+        throw new Error("No session cookies received from SAP");
       }
-    );
 
-    const cookies = response.headers["set-cookie"];
-    if (!cookies) {
-      throw new Error("No session cookies received from SAP");
+      const sessionCookie = cookies
+        .map((cookie) => cookie.split(";")[0])
+        .join("; ");
+
+      console.log(`Successfully logged in to SAP on attempt ${attempt}`);
+      return sessionCookie;
+    } catch (error) {
+      lastError = error;
+      console.error(`SAP Login attempt ${attempt} failed:`, error.message);
+
+      if (attempt < retries) {
+        console.log(`Waiting ${delay / 1000} seconds before next attempt...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
     }
-
-    // Format cookies for subsequent requests
-    const sessionCookie = cookies
-      .map((cookie) => cookie.split(";")[0])
-      .join("; ");
-    console.log("Successfully logged in to SAP");
-
-    return sessionCookie;
-  } catch (error) {
-    console.error("SAP Login failed:", error.message);
-    throw error;
   }
+
+  // All retries failed, throw the last error
+  console.error(`SAP Login failed after ${retries} attempts`);
+  throw lastError;
 };
 
 const generatePaymentLink = async (req, res) => {
@@ -247,7 +259,9 @@ const generatePaymentLink = async (req, res) => {
 
     // Create JSON with string concatenation (without double stringify)
     const customer_account_info_2 =
-      '{"payment_history_simple":' + JSON.stringify(customer_account_info) + "}";
+      '{"payment_history_simple":' +
+      JSON.stringify(customer_account_info) +
+      "}";
 
     // Encode to base64 directly
     const account_info = Buffer.from(customer_account_info_2).toString(
@@ -651,265 +665,336 @@ const syncNewOrders = async (req, res) => {
 
 const checkOrderStatus = async (req, res) => {
   try {
+    // Configure batch size and concurrency
+    const BATCH_SIZE = 15; // Reduced batch size for more stability
+    const MAX_CONCURRENT_BATCHES = 2; // Reduced concurrency to avoid overloading SAP
+    const REQUEST_TIMEOUT = 60000; // 10 seconds timeout
+    const MAX_SAP_LOGIN_RETRIES = 3; // Maximum login attempts
+
+    console.log("Starting order status check with fallback processing...");
     const openOrders = await SalesOrder.find({ DocumentStatus: "bost_Open" });
     console.log(`Found ${openOrders.length} open orders to check`);
 
-    const cookies = await loginToSAP();
+    if (openOrders.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "No open orders to check",
+        results: {
+          totalChecked: 0,
+          ordersUpdated: 0,
+          ordersUnchanged: 0,
+          checksFailed: 0,
+          details: [],
+        },
+      });
+    }
 
+    // Initialize results tracking
     const results = {
       total: openOrders.length,
       updated: 0,
       unchanged: 0,
-      failed: 0,
+      checksFailed: 0,
+      mode: "unknown", // Will be set to "sap" or "fallback"
       details: [],
     };
 
-    for (const order of openOrders) {
-      try {
-        const response = await axios.get(
-          `${process.env.BASE_URL}/Orders?$filter=DocNum eq ${order.DocNum}`,
-          {
-            headers: { Cookie: cookies },
-          }
-        );
+    // Try to get SAP cookies with retries
+    let cookies = null;
+    let sapAvailable = false;
 
-        const sapOrder = response.data.value[0];
+    try {
+      cookies = await loginToSAP(MAX_SAP_LOGIN_RETRIES, 5000);
+      sapAvailable = true;
+      results.mode = "sap";
+    } catch (loginError) {
+      console.warn(
+        "Failed to login to SAP after multiple attempts. Using fallback mode."
+      );
+      results.mode = "fallback";
 
-        const changes = getChangedFields(order, sapOrder);
-        const hasChanges = Object.keys(changes).length > 0;
-
-        if (hasChanges) {
-          await SalesOrder.updateOne(
-            { DocNum: order.DocNum },
-            {
-              $set: {
-                ...sapOrder,
-                lastUpdated: new Date(),
-                syncedAt: new Date(),
-              },
-            }
-          );
-
-          results.updated++;
-          results.details.push({
-            docNum: order.DocNum,
-            changes,
-            success: true,
-          });
-        } else {
-          results.unchanged++;
-        }
-      } catch (error) {
-        console.error(`Failed to check order ${order.DocNum}:`, error.message);
-        results.failed++;
-        results.details.push({
-          docNum: order.DocNum,
-          error: error.message,
+      // Return limited results when in fallback mode and just checking locally
+      // Only proceed to local update if explicitly requested
+      if (!req.query.fallback === "true") {
+        return res.status(200).json({
           success: false,
+          message:
+            "SAP connection failed. Use ?fallback=true to use local mode.",
+          error: loginError.message,
         });
       }
     }
 
+    // Split orders into batches
+    const batches = [];
+    for (let i = 0; i < openOrders.length; i += BATCH_SIZE) {
+      batches.push(openOrders.slice(i, i + BATCH_SIZE));
+    }
+    console.log(`Split orders into ${batches.length} batches`);
+
+    // Process based on SAP availability
+    if (sapAvailable) {
+      // SAP is available - use the standard batch processing approach
+      for (let i = 0; i < batches.length; i += MAX_CONCURRENT_BATCHES) {
+        const currentBatchGroup = batches.slice(i, i + MAX_CONCURRENT_BATCHES);
+        console.log(
+          `Processing batch group ${
+            Math.floor(i / MAX_CONCURRENT_BATCHES) + 1
+          } of ${Math.ceil(batches.length / MAX_CONCURRENT_BATCHES)}`
+        );
+
+        try {
+          // Process each batch in the current group in parallel
+          const batchPromises = currentBatchGroup.map((batch) =>
+            processBatch(batch, cookies, REQUEST_TIMEOUT, results)
+          );
+          await Promise.all(batchPromises);
+
+          // Small delay between batch groups
+          if (i + MAX_CONCURRENT_BATCHES < batches.length) {
+            await new Promise((resolve) => setTimeout(resolve, 2000)); // Increased to 2 seconds
+          }
+        } catch (batchError) {
+          console.error(`Error processing batch group: ${batchError.message}`);
+          // Continue to next batch group even if one fails
+        }
+      }
+    } else {
+      // SAP is unavailable - fallback to checking payment_status directly
+      console.log("Using fallback mode: Checking only local payment statuses");
+      await processLocalPaymentStatuses(openOrders, results);
+    }
+
+    // Send final results
     res.status(200).json({
       success: true,
-      message: "Order sync completed",
+      message: `Order status check completed in ${results.mode} mode`,
       results: {
         totalChecked: results.total,
         ordersUpdated: results.updated,
         ordersUnchanged: results.unchanged,
-        syncFailed: results.failed,
+        checksFailed: results.checksFailed,
+        processingMode: results.mode,
         details: results.details,
       },
     });
   } catch (error) {
-    console.error("Order sync failed:", error);
+    console.error("Order status check failed:", error);
     res.status(500).json({
       success: false,
-      error: "Order sync failed",
+      error: "Order status check failed",
       details: error.message,
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 };
 
-const getChangedFields = (mongoOrder, sapOrder) => {
-  const changes = {};
-  const fieldsToCompare = [
-    // Document Header Fields
-    "DocEntry",
-    "DocNum",
-    "DocType",
-    "DocumentStatus",
-    "Cancelled",
-    "DocDate",
-    "DocDueDate",
-    "CardCode",
-    "CardName",
-    "NumAtCard",
-    "DocTotal",
-    "VatSum",
-    "DiscountPercent",
-    "Comments",
-    "Series",
-    "DocCurrency",
-    "DocRate",
-    "Reference1",
-    "Reference2",
-    "CreationDate",
-    "UpdateDate",
-    "SalesPersonCode",
-    "TransportationCode",
-    "Confirmed",
-    "ImportFileNum",
-    "PaymentGroupCode",
-    "TaxDate",
-    "PickStatus",
-    "DocumentLines",
-    "ShipToCode",
-    "Address",
-    "Address2",
-    "OrderPriority",
-    "CancelDate",
-    "RequiredDate",
-    "ContactPersonCode",
-    "TotalDiscount",
-    "DownPaymentAmount",
-    "DownPaymentPercentage",
-    "StartDeliveryDate",
-    "EndDeliveryDate",
-    "OrderDate",
-    "ExtraMonth",
-    "ExtraMonth",
-    "CashDiscountDateOffset",
-    "StartDeliveryTime",
-    "EndDeliveryTime",
-    "ElectronicProtocols",
-    "DocumentsOwner",
-    "FolioNumber",
-    "DocumentSubType",
-    "BaseAmount",
-    "VatPercent",
-    "ServiceGrossProfitPercent",
-    "OpeningRemarks",
-    "ClosingRemarks",
-    "RoundingDiffAmount",
-    "Indicator",
-    "PaymentReference",
-    "FederalTaxID",
-    "GroupNumber",
-    "Project",
-    "PaymentMethod",
-    "PaymentBlock",
-    "PaymentBlockEntry",
-    "CentralBankIndicator",
-    "MaximumCashDiscount",
-    "Reserve",
-    "ExemptionValidityDateFrom",
-    "ExemptionValidityDateTo",
-    "WareHouseUpdateType",
-    "Rounding",
-    "ExternalCorrectedDocNum",
-    "InternalCorrectedDocNum",
-    "NextCorrectingDocument",
-    "DeferredTax",
-    "TaxExemptionLetterNum",
-    "WTApplied",
-    "WTAppliedSC",
-    "BillOfExchangeReserved",
-    "AgentCode",
-    "WTAppliedFC",
-    "WTAppliedSys",
-    "Period",
-    "PeriodIndicator",
-    "PayToCode",
-    "ManualNumber",
-    "UseShpdGoodsAct",
-    "IsPayToBank",
-    "PayToBankCountry",
-    "PayToBankCode",
-    "PayToBankAccountNo",
-    "PayToBankBranch",
-    "BPL_IDAssignedToInvoice",
-    "DownPayment",
-    "ReserveInvoice",
-    "LanguageCode",
-    "TrackingNumber",
-    "PickRemark",
-    "ClosingDate",
-    "SequenceCode",
-    "SequenceSerial",
-    "SeriesString",
-    "SubSeriesString",
-    "SequenceModel",
-    "UseCorrectionVATGroup",
-    "TotalDiscount",
-    "DownPaymentAmount",
-    "DownPaymentPercentage",
-    "DownPaymentType",
-    "DownPaymentAmountSC",
-    "DownPaymentAmountFC",
-    "VatPercent",
-    "ServiceGrossProfitPercent",
-    "OpeningRemarks",
-    "ClosingRemarks",
-    "RoundingDiffAmount",
-    "RoundingDiffAmountFC",
-    "RoundingDiffAmountSC",
-    "Cancelled",
-    "SignatureInputMessage",
-    "SignatureDigest",
-    "CertificationNumber",
-    "PrivateKeyVersion",
-    "ControlAccount",
-    "InsuranceOperation347",
-    "ArchiveNonremovableSalesQuotation",
-    "GTSChecker",
-    "GTSPayee",
-    "ExtraMonth",
-    "ExtraDays",
-    "CashDiscountDateOffset",
-    "StartDeliveryDate",
-    "StartDeliveryTime",
-    "EndDeliveryDate",
-    "EndDeliveryTime",
-    "VehiclePlate",
-    "ATDocumentType",
-    "ElecCommStatus",
-    "ElecCommMessage",
-    "ReuseDocumentNum",
-    "ReuseNotaFiscalNum",
-    "PrintSEPADirect",
-    "FiscalDocNum",
-    "POSDailySummaryNo",
-    "POSReceiptNo",
-    "PointOfIssueCode",
-    "Letter",
-    "FolioNumberFrom",
-    "FolioNumberTo",
-    "InterimType",
-    "RelatedType",
-    "RelatedEntry",
-    "DocumentTaxID",
-    "DateOfReportingControlStatementVAT",
-    "ClosingOption",
-    "SpecifiedClosingDate",
-    "OpenForLandedCosts",
-    "AuthorizationStatus",
-    "BPLID",
-    "BPLName",
-    "VATRegNum",
-    // Document Lines
-    "DocumentLines",
-  ];
+// Helper function to process local payment statuses when SAP is unavailable
+const processLocalPaymentStatuses = async (orders, results) => {
+  const paymentStatusPromises = [];
 
-  for (const field of fieldsToCompare) {
-    if (JSON.stringify(mongoOrder[field]) !== JSON.stringify(sapOrder[field])) {
-      changes[field] = {
-        old: mongoOrder[field],
-        new: sapOrder[field],
-      };
+  // Process orders with Payment_id to check their payment status
+  for (const order of orders) {
+    if (order.Payment_id && order.Link_sent) {
+      paymentStatusPromises.push(
+        (async () => {
+          try {
+            // Check payment status directly with Adyen
+            const response = await axios.get(
+              `${process.env.ADYEN_API_BASE_URL}/paymentLinks/${order.Payment_id}`,
+              {
+                headers: {
+                  "X-API-KEY": process.env.ADYEN_API_KEY,
+                  "Content-Type": "application/json",
+                },
+                timeout: 10000,
+              }
+            );
+
+            const paymentStatus = response.data.status;
+            const oldStatus = order.payment_status || "unknown";
+
+            if (oldStatus !== paymentStatus) {
+              // Update order payment status
+              await SalesOrder.updateOne(
+                { DocNum: order.DocNum },
+                {
+                  $set: {
+                    payment_status: paymentStatus,
+                    lastUpdated: new Date(),
+                  },
+                }
+              );
+
+              results.updated++;
+              results.details.push({
+                docNum: order.DocNum,
+                oldStatus: oldStatus,
+                newStatus: paymentStatus,
+                source: "payment_gateway",
+                success: true,
+              });
+            } else {
+              results.unchanged++;
+            }
+          } catch (error) {
+            console.error(
+              `Failed to check payment for order ${order.DocNum}:`,
+              error.message
+            );
+            results.checksFailed++;
+            results.details.push({
+              docNum: order.DocNum,
+              error: `Payment check failed: ${error.message}`,
+              success: false,
+            });
+          }
+        })()
+      );
+    } else {
+      // Skip orders without payment IDs
+      results.unchanged++;
     }
   }
-  return changes;
+
+  // Wait for all payment status checks to complete
+  await Promise.allSettled(paymentStatusPromises);
+};
+
+// Helper function to process a batch of orders when SAP is available
+const processBatch = async (orderBatch, cookies, timeout, results) => {
+  // Use Promise.allSettled to ensure all order processing completes
+  // even if some orders fail
+  const batchPromises = orderBatch.map((order) =>
+    processOrder(order, cookies, timeout, results)
+  );
+
+  return Promise.allSettled(batchPromises);
+};
+
+// Helper function to process a single order
+const processOrder = async (order, cookies, timeout, results) => {
+  try {
+    // Create filter query for a single DocNum
+    const response = await axios.get(
+      `${process.env.BASE_URL}/Orders?$filter=DocNum eq ${order.DocNum}`,
+      {
+        headers: { Cookie: cookies },
+        timeout: timeout,
+      }
+    );
+
+    if (!response.data.value || response.data.value.length === 0) {
+      console.warn(`No data returned from SAP for order ${order.DocNum}`);
+      results.checksFailed++;
+      results.details.push({
+        docNum: order.DocNum,
+        error: "No data returned from SAP",
+        success: false,
+      });
+      return;
+    }
+
+    const sapOrder = response.data.value[0];
+    const oldStatus = order.DocumentStatus;
+    const newStatus = sapOrder.DocumentStatus;
+    let statusChanged = false;
+    let fieldsToUpdate = {
+      lastUpdated: new Date(),
+    };
+
+    // Check for status change
+    if (oldStatus !== newStatus) {
+      fieldsToUpdate.DocumentStatus = newStatus;
+      statusChanged = true;
+    }
+
+    // Check for total change
+    if (order.DocTotal !== sapOrder.DocTotal) {
+      fieldsToUpdate.DocTotal = sapOrder.DocTotal;
+      statusChanged = true;
+    }
+
+    // Check for UpdateDate change
+    if (order.UpdateDate !== sapOrder.UpdateDate) {
+      fieldsToUpdate.UpdateDate = sapOrder.UpdateDate;
+      statusChanged = true;
+    }
+
+    // Only update if something changed
+    if (statusChanged) {
+      await SalesOrder.updateOne(
+        { DocNum: order.DocNum },
+        { $set: fieldsToUpdate }
+      );
+
+      results.updated++;
+      results.details.push({
+        docNum: order.DocNum,
+        oldStatus: oldStatus,
+        newStatus: newStatus,
+        source: "sap",
+        success: true,
+      });
+    } else {
+      results.unchanged++;
+    }
+
+    // Additional check for payment status if the order has a payment ID
+    if (order.Payment_id && !order.payment_status) {
+      try {
+        // Check payment status directly with Adyen
+        const paymentResponse = await axios.get(
+          `${process.env.ADYEN_API_BASE_URL}/paymentLinks/${order.Payment_id}`,
+          {
+            headers: {
+              "X-API-KEY": process.env.ADYEN_API_KEY,
+              "Content-Type": "application/json",
+            },
+            timeout: 5000,
+          }
+        );
+
+        const paymentStatus = paymentResponse.data.status;
+        if (paymentStatus && paymentStatus !== order.payment_status) {
+          await SalesOrder.updateOne(
+            { DocNum: order.DocNum },
+            {
+              $set: {
+                payment_status: paymentStatus,
+                lastUpdated: new Date(),
+              },
+            }
+          );
+
+          // Only count as update if not already counted above
+          if (!statusChanged) {
+            results.updated++;
+            results.details.push({
+              docNum: order.DocNum,
+              oldStatus: order.payment_status || "none",
+              newStatus: paymentStatus,
+              source: "payment_gateway",
+              success: true,
+            });
+          }
+        }
+      } catch (paymentError) {
+        // Don't fail the entire order process if payment check fails
+        console.warn(
+          `Payment status check failed for order ${order.DocNum}: ${paymentError.message}`
+        );
+      }
+    }
+  } catch (error) {
+    console.error(`Failed to check order ${order.DocNum}:`, error.message);
+    results.checksFailed++;
+    results.details.push({
+      docNum: order.DocNum,
+      error: error.message,
+      success: false,
+    });
+  }
 };
 
 module.exports = {
