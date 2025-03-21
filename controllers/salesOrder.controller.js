@@ -200,6 +200,10 @@ const loginToSAP = async (retries = 3, delay = 5000) => {
         Password: process.env.PASSWORD,
       };
 
+      // Log the request without sensitive information
+      console.log(`Attempting to connect to: ${process.env.BASE_URL}/Login`);
+      console.log(`Using company DB: ${process.env.COMPANY_DB}`);
+
       const response = await axios.post(
         `${process.env.BASE_URL}/Login`,
         loginData,
@@ -208,14 +212,39 @@ const loginToSAP = async (retries = 3, delay = 5000) => {
             "Content-Type": "application/json",
           },
           timeout: 20000, // 20 second timeout for login
+          validateStatus: false, // Don't throw errors on non-2xx responses
         }
       );
 
+      // Log response status and headers for debugging
+      console.log(`SAP Login response status: ${response.status}`);
+      console.log(`SAP Login response headers:`, Object.keys(response.headers));
+
+      // Check if we got a non-successful status code
+      if (response.status !== 200) {
+        console.error(
+          `SAP Login failed with status ${response.status}:`,
+          response.data
+        );
+        throw new Error(
+          `SAP returned status ${response.status}: ${JSON.stringify(
+            response.data
+          )}`
+        );
+      }
+
       const cookies = response.headers["set-cookie"];
-      if (!cookies) {
+      if (!cookies || cookies.length === 0) {
+        console.error("No cookies returned from SAP login");
         throw new Error("No session cookies received from SAP");
       }
 
+      // Log the cookie names (not values) for debugging
+      console.log(
+        `Received cookies: ${cookies.map((c) => c.split("=")[0]).join(", ")}`
+      );
+
+      // Parse cookie string properly
       const sessionCookie = cookies
         .map((cookie) => cookie.split(";")[0])
         .join("; ");
@@ -224,7 +253,29 @@ const loginToSAP = async (retries = 3, delay = 5000) => {
       return sessionCookie;
     } catch (error) {
       lastError = error;
-      console.error(`SAP Login attempt ${attempt} failed:`, error.message);
+
+      // Enhanced error logging
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        console.error(
+          `SAP Login attempt ${attempt} failed with status ${error.response.status}:`
+        );
+        console.error(`Response data:`, error.response.data);
+        console.error(`Response headers:`, error.response.headers);
+      } else if (error.request) {
+        // The request was made but no response was received
+        console.error(
+          `SAP Login attempt ${attempt} failed - No response received:`,
+          error.request
+        );
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        console.error(
+          `SAP Login attempt ${attempt} setup error:`,
+          error.message
+        );
+      }
 
       if (attempt < retries) {
         console.log(`Waiting ${delay / 1000} seconds before next attempt...`);
@@ -665,116 +716,294 @@ const syncNewOrders = async (req, res) => {
 
 const checkOrderStatus = async (req, res) => {
   try {
-    // Configure batch size and concurrency
-    const BATCH_SIZE = 15; // Reduced batch size for more stability
-    const MAX_CONCURRENT_BATCHES = 2; // Reduced concurrency to avoid overloading SAP
-    const REQUEST_TIMEOUT = 60000; // 10 seconds timeout
-    const MAX_SAP_LOGIN_RETRIES = 3; // Maximum login attempts
+    // Configuration options
+    const BATCH_SIZE = 20; // SAP's recommended maximum batch size
+    const MAX_BATCHES_PER_RUN = 20; // Limit the total number of batches per run to avoid timeouts
 
-    console.log("Starting order status check with fallback processing...");
-    const openOrders = await SalesOrder.find({ DocumentStatus: "bost_Open" });
-    console.log(`Found ${openOrders.length} open orders to check`);
+    console.log("Starting optimized order status check...");
 
-    if (openOrders.length === 0) {
+    // Set up filters for the query - only check orders with open status
+    const query = {
+      DocumentStatus: "bost_Open",
+    };
+
+    // Count total orders that need checking
+    const totalOrdersToCheck = await SalesOrder.countDocuments(query);
+
+    if (totalOrdersToCheck === 0) {
       return res.status(200).json({
         success: true,
-        message: "No open orders to check",
-        results: {
-          totalChecked: 0,
-          ordersUpdated: 0,
-          ordersUnchanged: 0,
-          checksFailed: 0,
-          details: [],
-        },
+        message: "No orders need checking at this time",
+        results: { totalChecked: 0 },
       });
     }
 
-    // Initialize results tracking
+    console.log(`Found ${totalOrdersToCheck} open orders to check`);
+
+    // Results tracking
     const results = {
-      total: openOrders.length,
+      totalEligible: totalOrdersToCheck,
+      totalChecked: 0,
       updated: 0,
       unchanged: 0,
-      checksFailed: 0,
-      mode: "unknown", // Will be set to "sap" or "fallback"
+      failed: 0,
       details: [],
+      processingMode: "sap",
     };
 
-    // Try to get SAP cookies with retries
-    let cookies = null;
-    let sapAvailable = false;
+    // Login to SAP once per run
+    const cookies = await loginToSAP();
 
-    try {
-      cookies = await loginToSAP(MAX_SAP_LOGIN_RETRIES, 5000);
-      sapAvailable = true;
-      results.mode = "sap";
-    } catch (loginError) {
-      console.warn(
-        "Failed to login to SAP after multiple attempts. Using fallback mode."
+    // Initialize update operations array
+    const updateOperations = [];
+    const timestamp = new Date();
+
+    // Process orders in batches
+    let processedBatches = 0;
+    let ordersToCheck = await SalesOrder.find(query).limit(BATCH_SIZE);
+
+    while (ordersToCheck.length > 0 && processedBatches < MAX_BATCHES_PER_RUN) {
+      // Batch approach - get all order entries for this batch
+      const orderEntries = ordersToCheck.map((order) => order.DocEntry);
+
+      // Update results counter
+      results.totalChecked += ordersToCheck.length;
+
+      // Use the $filter query to get multiple orders in a single request
+      // This is much more efficient than individual API calls
+      const batchQuery = orderEntries
+        .map((entry) => `DocEntry eq ${entry}`)
+        .join(" or ");
+      const url = `${process.env.BASE_URL}/Orders?$filter=${batchQuery}&$select=DocEntry,DocNum,DocumentStatus,DocTotal,UpdateDate`;
+
+      console.log(
+        `Fetching batch ${processedBatches + 1} with ${
+          orderEntries.length
+        } orders from SAP`
       );
-      results.mode = "fallback";
 
-      // Return limited results when in fallback mode and just checking locally
-      // Only proceed to local update if explicitly requested
-      if (!req.query.fallback === "true") {
-        return res.status(200).json({
+      try {
+        // Make a single API call to get all orders
+        const response = await axios.get(url, {
+          headers: { Cookie: cookies },
+          timeout: 30000, // 30 second timeout for the batch
+        });
+
+        if (!response.data.value) {
+          throw new Error("Invalid response from SAP - missing value array");
+        }
+
+        const sapOrders = response.data.value;
+        console.log(`Received ${sapOrders.length} orders from SAP`);
+
+        // Create a map for quick lookups
+        const sapOrderMap = {};
+        sapOrders.forEach((order) => {
+          sapOrderMap[order.DocEntry] = order;
+        });
+
+        // Process all orders and prepare updates
+        for (const order of ordersToCheck) {
+          try {
+            const sapOrder = sapOrderMap[order.DocEntry];
+
+            // If this order was not found in SAP response, skip it
+            if (!sapOrder) {
+              results.failed++;
+              results.details.push({
+                docNum: order.DocNum,
+                error: "Not found in SAP response",
+                success: false,
+              });
+              continue;
+            }
+
+            // Check if anything relevant has changed
+            const statusChanged =
+              order.DocumentStatus !== sapOrder.DocumentStatus;
+            const totalChanged = order.DocTotal !== sapOrder.DocTotal;
+            const updateDateChanged = order.UpdateDate !== sapOrder.UpdateDate;
+
+            if (statusChanged || totalChanged || updateDateChanged) {
+              // Prepare the update operation
+              updateOperations.push({
+                updateOne: {
+                  filter: { DocEntry: order.DocEntry },
+                  update: {
+                    $set: {
+                      DocumentStatus: sapOrder.DocumentStatus,
+                      DocTotal: sapOrder.DocTotal,
+                      UpdateDate: sapOrder.UpdateDate,
+                      lastUpdated: timestamp,
+                      lastStatusCheck: timestamp,
+                    },
+                  },
+                },
+              });
+
+              results.updated++;
+              if (results.details.length < 50) {
+                // Limit details to avoid huge responses
+                results.details.push({
+                  docNum: order.DocNum,
+                  oldStatus: order.DocumentStatus,
+                  newStatus: sapOrder.DocumentStatus,
+                  success: true,
+                });
+              }
+            } else {
+              // Update only the lastStatusCheck field
+              updateOperations.push({
+                updateOne: {
+                  filter: { DocEntry: order.DocEntry },
+                  update: {
+                    $set: {
+                      lastStatusCheck: timestamp,
+                    },
+                  },
+                },
+              });
+
+              results.unchanged++;
+            }
+          } catch (error) {
+            results.failed++;
+            if (results.details.length < 50) {
+              results.details.push({
+                docNum: order.DocNum,
+                error: error.message,
+                success: false,
+              });
+            }
+          }
+        }
+
+        // Process payment statuses for this batch
+        const paymentCheckPromises = ordersToCheck
+          .filter(
+            (order) =>
+              order.Payment_id &&
+              (!order.payment_status || order.payment_status !== "PAID")
+          )
+          .map(async (order) => {
+            try {
+              const response = await axios.get(
+                `${process.env.ADYEN_API_BASE_URL}/paymentLinks/${order.Payment_id}`,
+                {
+                  headers: {
+                    "X-API-KEY": process.env.ADYEN_API_KEY,
+                    "Content-Type": "application/json",
+                  },
+                  timeout: 5000,
+                }
+              );
+
+              const paymentStatus = response.data.status;
+
+              if (paymentStatus && paymentStatus !== order.payment_status) {
+                updateOperations.push({
+                  updateOne: {
+                    filter: { DocEntry: order.DocEntry },
+                    update: {
+                      $set: {
+                        payment_status: paymentStatus,
+                        lastUpdated: timestamp,
+                      },
+                    },
+                  },
+                });
+
+                // Don't increment results.updated if we already counted this order
+                if (
+                  !results.details.some(
+                    (d) => d.docNum === order.DocNum && d.success
+                  )
+                ) {
+                  results.updated++;
+                  if (results.details.length < 50) {
+                    results.details.push({
+                      docNum: order.DocNum,
+                      paymentStatus: paymentStatus,
+                      source: "payment_gateway",
+                      success: true,
+                    });
+                  }
+                }
+              }
+            } catch (error) {
+              // Don't count this as a failure for the overall process
+              console.warn(
+                `Payment check failed for order ${order.DocNum}: ${error.message}`
+              );
+            }
+          });
+
+        // Wait for payment checks to complete
+        await Promise.allSettled(paymentCheckPromises);
+
+        // Increment batch counter
+        processedBatches++;
+
+        // Get next batch of orders, excluding ones we've already processed
+        const processedIds = ordersToCheck.map((o) => o.DocEntry);
+        ordersToCheck = await SalesOrder.find({
+          ...query,
+          DocEntry: { $nin: processedIds },
+        }).limit(BATCH_SIZE);
+
+        console.log(`Next batch size: ${ordersToCheck.length}`);
+      } catch (error) {
+        console.error(`Error processing batch ${processedBatches + 1}:`, error);
+        results.failed += ordersToCheck.length;
+        results.details.push({
+          error: `Batch ${processedBatches + 1} failed: ${error.message}`,
           success: false,
-          message:
-            "SAP connection failed. Use ?fallback=true to use local mode.",
-          error: loginError.message,
+        });
+
+        // Move to next batch
+        processedBatches++;
+        const processedIds = ordersToCheck.map((o) => o.DocEntry);
+        ordersToCheck = await SalesOrder.find({
+          ...query,
+          DocEntry: { $nin: processedIds },
+        }).limit(BATCH_SIZE);
+      }
+    }
+
+    // Perform all database updates in a single bulk operation
+    if (updateOperations.length > 0) {
+      try {
+        const bulkResult = await SalesOrder.bulkWrite(updateOperations, {
+          ordered: false,
+        });
+        console.log(
+          `Bulk update completed: ${bulkResult.modifiedCount} documents modified`
+        );
+      } catch (bulkError) {
+        console.error("Error during bulk update:", bulkError);
+        results.details.push({
+          error: `Bulk update failed: ${bulkError.message}`,
+          success: false,
         });
       }
     }
 
-    // Split orders into batches
-    const batches = [];
-    for (let i = 0; i < openOrders.length; i += BATCH_SIZE) {
-      batches.push(openOrders.slice(i, i + BATCH_SIZE));
-    }
-    console.log(`Split orders into ${batches.length} batches`);
-
-    // Process based on SAP availability
-    if (sapAvailable) {
-      // SAP is available - use the standard batch processing approach
-      for (let i = 0; i < batches.length; i += MAX_CONCURRENT_BATCHES) {
-        const currentBatchGroup = batches.slice(i, i + MAX_CONCURRENT_BATCHES);
-        console.log(
-          `Processing batch group ${
-            Math.floor(i / MAX_CONCURRENT_BATCHES) + 1
-          } of ${Math.ceil(batches.length / MAX_CONCURRENT_BATCHES)}`
-        );
-
-        try {
-          // Process each batch in the current group in parallel
-          const batchPromises = currentBatchGroup.map((batch) =>
-            processBatch(batch, cookies, REQUEST_TIMEOUT, results)
-          );
-          await Promise.all(batchPromises);
-
-          // Small delay between batch groups
-          if (i + MAX_CONCURRENT_BATCHES < batches.length) {
-            await new Promise((resolve) => setTimeout(resolve, 2000)); // Increased to 2 seconds
-          }
-        } catch (batchError) {
-          console.error(`Error processing batch group: ${batchError.message}`);
-          // Continue to next batch group even if one fails
-        }
-      }
-    } else {
-      // SAP is unavailable - fallback to checking payment_status directly
-      console.log("Using fallback mode: Checking only local payment statuses");
-      await processLocalPaymentStatuses(openOrders, results);
+    // Add reason if we didn't process all orders
+    let message = `Order status check completed successfully`;
+    if (results.totalChecked < results.totalEligible) {
+      message += ` (processed ${results.totalChecked} of ${results.totalEligible} orders - batch limit reached)`;
     }
 
-    // Send final results
+    // Return the results
     res.status(200).json({
       success: true,
-      message: `Order status check completed in ${results.mode} mode`,
+      message,
       results: {
-        totalChecked: results.total,
+        totalEligible: results.totalEligible,
+        totalChecked: results.totalChecked,
         ordersUpdated: results.updated,
         ordersUnchanged: results.unchanged,
-        checksFailed: results.checksFailed,
-        processingMode: results.mode,
+        checksFailed: results.failed,
         details: results.details,
       },
     });
@@ -784,9 +1013,53 @@ const checkOrderStatus = async (req, res) => {
       success: false,
       error: "Order status check failed",
       details: error.message,
-      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
+};
+
+// Add this function to do periodic checks on a schedule without overloading the system
+const scheduleOrderStatusChecks = () => {
+  const scheduleCheck = async () => {
+    try {
+      // Base query for open orders
+      const query = { DocumentStatus: "bost_Open" };
+
+      // Count eligible orders
+      const count = await SalesOrder.countDocuments(query);
+
+      if (count === 0) {
+        console.log("No orders need checking");
+        return;
+      }
+
+      console.log(`Scheduled check: ${count} orders eligible for checking`);
+
+      // Simulate request object for calling checkOrderStatus
+      const mockReq = { query: { automated: true } };
+      const mockRes = {
+        status: (code) => ({
+          json: (data) => {
+            console.log(`Scheduled check completed with status ${code}`);
+            if (code === 200) {
+              console.log(`Updated ${data.results.ordersUpdated} orders`);
+            } else {
+              console.error(`Check failed: ${data.error}`);
+            }
+          },
+        }),
+      };
+
+      await checkOrderStatus(mockReq, mockRes);
+    } catch (error) {
+      console.error("Scheduled order check failed:", error);
+    }
+  };
+
+  // Schedule checks every hour
+  setInterval(() => scheduleCheck(), 60 * 60 * 1000);
+
+  // Run an initial check on startup (after a short delay)
+  setTimeout(() => scheduleCheck(), 60 * 1000);
 };
 
 // Helper function to process local payment statuses when SAP is unavailable
@@ -877,7 +1150,7 @@ const processOrder = async (order, cookies, timeout, results) => {
   try {
     // Create filter query for a single DocNum
     const response = await axios.get(
-      `${process.env.BASE_URL}/Orders?$filter=DocNum eq ${order.DocNum}`,
+      `${process.env.BASE_URL}/Orders('${order.DocEntry}')`,
       {
         headers: { Cookie: cookies },
         timeout: timeout,
