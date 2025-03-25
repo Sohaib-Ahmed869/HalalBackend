@@ -719,22 +719,20 @@ const checkOrderStatus = async (req, res) => {
     // Configuration options
     const BATCH_SIZE = 20; // SAP's recommended maximum batch size
 
-    console.log("Starting optimized order status check...");
+    console.log("Starting simplified order status check...");
 
     // Set up filters for the query - only check orders with open status
     const query = {
-      DocumentStatus: "bost_Open",
+      DocumentStatus: "bost_Open", // Only get orders that are currently open in our database
     };
 
     // Count total orders that need checking
     const totalOrdersToCheck = await SalesOrder.countDocuments(query);
 
-    const MAX_BATCHES_PER_RUN = totalOrdersToCheck / BATCH_SIZE;
-
     if (totalOrdersToCheck === 0) {
       return res.status(200).json({
         success: true,
-        message: "No orders need checking at this time",
+        message: "No open orders need checking at this time",
         results: { totalChecked: 0 },
       });
     }
@@ -749,7 +747,6 @@ const checkOrderStatus = async (req, res) => {
       unchanged: 0,
       failed: 0,
       details: [],
-      processingMode: "sap",
     };
 
     // Login to SAP once per run
@@ -759,38 +756,59 @@ const checkOrderStatus = async (req, res) => {
     const updateOperations = [];
     const timestamp = new Date();
 
-    // Process orders in batches
-    let processedBatches = 0;
-    let ordersToCheck = await SalesOrder.find(query).limit(BATCH_SIZE);
+    // Process ALL orders in batches of 20
+    let processedOrders = 0;
+    let skip = 0;
+    let currentBatch = [];
+    let batchCount = 0;
+    let hasMoreOrders = true;
 
-    while (ordersToCheck.length > 0 && processedBatches < MAX_BATCHES_PER_RUN) {
-      // Batch approach - get all order entries for this batch
-      const orderEntries = ordersToCheck.map((order) => order.DocEntry);
+    // Process all open orders in batches
+    while (hasMoreOrders) {
+      // Get next batch of orders
+      currentBatch = await SalesOrder.find(query)
+        .skip(skip)
+        .limit(BATCH_SIZE)
+        .lean();
 
-      // Update results counter
-      results.totalChecked += ordersToCheck.length;
+      // Check if we have more orders after this batch
+      skip += currentBatch.length;
+      hasMoreOrders = currentBatch.length === BATCH_SIZE;
 
-      // Use the $filter query to get multiple orders in a single request
-      // This is much more efficient than individual API calls
-      const batchQuery = orderEntries
-        .map((entry) => `DocEntry eq ${entry}`)
-        .join(" or ");
-      const url = `${process.env.BASE_URL}/Orders?$filter=${batchQuery}&$select=DocEntry,DocNum,DocumentStatus,DocTotal,UpdateDate`;
+      // If no orders in this batch, we're done
+      if (currentBatch.length === 0) {
+        break;
+      }
 
+      batchCount++;
       console.log(
-        `Fetching batch ${processedBatches + 1} with ${
-          orderEntries.length
-        } orders from SAP`
+        `Processing batch ${batchCount} with ${currentBatch.length} orders`
+      );
+      batchCount++;
+      console.log(
+        `Processing batch ${batchCount} with ${currentBatch.length} orders`
       );
 
       try {
+        // Get all order entries for this batch
+        const orderEntries = currentBatch.map((order) => order.DocEntry);
+
+        // Update results counter
+        results.totalChecked += currentBatch.length;
+
+        // Build query for SAP API
+        const batchQuery = orderEntries
+          .map((entry) => `DocEntry eq ${entry}`)
+          .join(" or ");
+        const url = `${process.env.BASE_URL}/Orders?$filter=${batchQuery}&$select=DocEntry,DocNum,DocumentStatus,DocTotal,UpdateDate`;
+
         // Make a single API call to get all orders
         const response = await axios.get(url, {
           headers: { Cookie: cookies },
           timeout: 30000, // 30 second timeout for the batch
         });
 
-        if (!response.data.value) {
+        if (!response.data || !response.data.value) {
           throw new Error("Invalid response from SAP - missing value array");
         }
 
@@ -803,8 +821,8 @@ const checkOrderStatus = async (req, res) => {
           sapOrderMap[order.DocEntry] = order;
         });
 
-        // Process all orders and prepare updates
-        for (const order of ordersToCheck) {
+        // Process all orders in this batch
+        for (const order of currentBatch) {
           try {
             const sapOrder = sapOrderMap[order.DocEntry];
 
@@ -879,95 +897,17 @@ const checkOrderStatus = async (req, res) => {
           }
         }
 
-        // Process payment statuses for this batch
-        const paymentCheckPromises = ordersToCheck
-          .filter(
-            (order) =>
-              order.Payment_id &&
-              (!order.payment_status || order.payment_status !== "PAID")
-          )
-          .map(async (order) => {
-            try {
-              const response = await axios.get(
-                `${process.env.ADYEN_API_BASE_URL}/paymentLinks/${order.Payment_id}`,
-                {
-                  headers: {
-                    "X-API-KEY": process.env.ADYEN_API_KEY,
-                    "Content-Type": "application/json",
-                  },
-                  timeout: 5000,
-                }
-              );
-
-              const paymentStatus = response.data.status;
-
-              if (paymentStatus && paymentStatus !== order.payment_status) {
-                updateOperations.push({
-                  updateOne: {
-                    filter: { DocEntry: order.DocEntry },
-                    update: {
-                      $set: {
-                        payment_status: paymentStatus,
-                        lastUpdated: timestamp,
-                      },
-                    },
-                  },
-                });
-
-                // Don't increment results.updated if we already counted this order
-                if (
-                  !results.details.some(
-                    (d) => d.docNum === order.DocNum && d.success
-                  )
-                ) {
-                  results.updated++;
-                  if (results.details.length < 50) {
-                    results.details.push({
-                      docNum: order.DocNum,
-                      paymentStatus: paymentStatus,
-                      source: "payment_gateway",
-                      success: true,
-                    });
-                  }
-                }
-              }
-            } catch (error) {
-              // Don't count this as a failure for the overall process
-              console.warn(
-                `Payment check failed for order ${order.DocNum}: ${error.message}`
-              );
-            }
-          });
-
-        // Wait for payment checks to complete
-        await Promise.allSettled(paymentCheckPromises);
-
-        // Increment batch counter
-        processedBatches++;
-
-        // Get next batch of orders, excluding ones we've already processed
-        const processedIds = ordersToCheck.map((o) => o.DocEntry);
-        ordersToCheck = await SalesOrder.find({
-          ...query,
-          DocEntry: { $nin: processedIds },
-        }).limit(BATCH_SIZE);
-
-        console.log(`Next batch size: ${ordersToCheck.length}`);
+        processedOrders += currentBatch.length;
+        console.log(
+          `Processed ${processedOrders}/${totalOrdersToCheck} orders so far`
+        );
       } catch (error) {
-        console.error(`Error processing batch ${processedBatches + 1}:`, error);
-        results.failed += ordersToCheck.length;
+        console.error(`Error processing batch ${batchCount}:`, error);
+        results.failed += currentBatch.length;
         results.details.push({
-          error: `Batch ${processedBatches + 1} failed: ${error.message}`,
+          error: `Batch ${batchCount} failed: ${error.message}`,
           success: false,
         });
-
-        // Move to next batch
-        processedBatches++;
-        const processedIds = ordersToCheck.map((o) => o.DocEntry);
-        ordersToCheck = await SalesOrder.find({
-          ...query,
-          DocEntry: { $nin: processedIds },
-        }).limit(BATCH_SIZE);
       }
     }
 
@@ -989,16 +929,10 @@ const checkOrderStatus = async (req, res) => {
       }
     }
 
-    // Add reason if we didn't process all orders
-    let message = `Order status check completed successfully`;
-    if (results.totalChecked < results.totalEligible) {
-      message += ` (processed ${results.totalChecked} of ${results.totalEligible} orders - batch limit reached)`;
-    }
-
     // Return the results
     res.status(200).json({
       success: true,
-      message,
+      message: `Order status check completed successfully. Processed ${results.totalChecked} orders.`,
       results: {
         totalEligible: results.totalEligible,
         totalChecked: results.totalChecked,
@@ -1017,7 +951,6 @@ const checkOrderStatus = async (req, res) => {
     });
   }
 };
-
 // Add this function to do periodic checks on a schedule without overloading the system
 const scheduleOrderStatusChecks = () => {
   const scheduleCheck = async () => {
