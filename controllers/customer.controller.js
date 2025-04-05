@@ -7,11 +7,13 @@ const { getModel } = require("../utils/modelFactory");
 
 
 // Function to import data
-async function importCustomers() {
+async function importCustomers(req, res) {
     try {
+        // Get the Customer model from the database connection
+
         const Customer = getModel(req.dbConnection, 'Customer'); 
         // Read Excel file
-        const workbook = xlsx.readFile('20250117T002950.943-Customers List.xlsx');
+        const workbook = xlsx.readFile('20250405T192519.555-Customers_Lyon.xlsx');
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
         const data = xlsx.utils.sheet_to_json(worksheet);
@@ -58,7 +60,7 @@ async function importCustomers() {
 const importCustomer = async (req, res) => {
     try {
         const Customer = getModel(req.dbConnection, 'Customer');
-        await importCustomers();
+        await importCustomers(req, res);
         res.status(200).send('Import completed');
     } catch (err) {
         console.error('Import failed:', err);
