@@ -1,5 +1,5 @@
 const Return = require("../models/returns.model");
-
+const { getModel } = require("../utils/modelFactory");
 class ReturnsController {
   static async getReturnsByDate(req, res) {
     try {
@@ -14,6 +14,7 @@ class ReturnsController {
       const skip = (page - 1) * limit;
 
       // Query to fetch returns by date range
+      const Return = getModel(req.dbConnection, "Return");
       const returns = await Return.find({
         DocDate: {
           $gte: new Date(startDate),
@@ -63,6 +64,8 @@ class ReturnsController {
       const skip = (page - 1) * limit;
 
       // Query to fetch returns by customer
+      const Return = getModel(req.dbConnection, "Return");
+
       const returns = await Return.find({ CardCode: cardCode })
         .sort({ DocDate: -1 })
         .skip(skip)
@@ -99,6 +102,8 @@ class ReturnsController {
       }
 
       // Query to fetch specific return by DocEntry
+      const Return = getModel(req.dbConnection, "Return");
+
       const returnDoc = await Return.findOne({ DocEntry: docEntry });
 
       // Check if return exists
@@ -124,6 +129,7 @@ class ReturnsController {
       if (!docNum) {
         return res.status(400).json({ error: "Document number is required" });
       }
+      const Return = getModel(req.dbConnection, "Return");
 
       const returnDoc = await Return.findOne({ DocNum: docNum }).lean(); // For better performance
 

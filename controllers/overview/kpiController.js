@@ -4,6 +4,7 @@ const PurchaseInvoice = require("../../models/Purchase");
 const Payment = require("../../models/payment.model");
 const Expense = require("../../models/expense.model");
 const { processTagFilter } = require("../../utils/filterHelper");
+const { getModel } = require("../../utils/modelFactory");
 
 // Define date filter for all queries
 const enhancedKpiController = {
@@ -17,6 +18,11 @@ const enhancedKpiController = {
    */
   getEnhancedKpis: async (req, res) => {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const PurchaseInvoice = getModel(req.dbConnection, "PurchaseInvoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const Expense = getModel(req.dbConnection, "Expense");
+
       const { startDate, endDate, previousStartDate, previousEndDate, tags } =
         req.query;
 
@@ -426,6 +432,11 @@ const enhancedKpiController = {
    */
   getCashFlowAnalytics: async (req, res) => {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const PurchaseInvoice = getModel(req.dbConnection, "PurchaseInvoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const Expense = getModel(req.dbConnection, "Expense");
+      
       const { startDate, endDate, groupBy = "month", tags } = req.query;
 
       // Validate inputs

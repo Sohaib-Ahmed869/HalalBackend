@@ -2,9 +2,12 @@
 const express = require("express");
 const router = express.Router();
 const TagModel = require("../models/tags.model");
+const { getModel } = require("../utils/modelFactory");
 
 router.get("/", async (req, res) => {
   try {
+    // Get the database connection from the request
+    const TagModel = getModel(req.dbConnection, "Tag");
     const tags = await TagModel.find();
     res.json(tags);
   } catch (error) {
@@ -13,6 +16,8 @@ router.get("/", async (req, res) => {
 });
 
 router.post("/", async (req, res) => {
+  const TagModel = getModel(req.dbConnection, "Tag");
+
   const tag = new TagModel({
     name: req.body.name,
     category: req.body.category,
@@ -28,6 +33,8 @@ router.post("/", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
+    const TagModel = getModel(req.dbConnection, "Tag");
+
     await TagModel.findByIdAndDelete(req.params.id);
     res.json({ message: "Tag deleted" });
   } catch (error) {

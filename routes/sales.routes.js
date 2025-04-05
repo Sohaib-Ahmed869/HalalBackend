@@ -6,6 +6,8 @@ const FormData = require("form-data");
 const Sale = require("../models/sales.model");
 const upload = multer({ storage: multer.memoryStorage() });
 
+const {getModel} = require("../utils/modelFactory");
+
 const FLASK_BACKEND_URL = "http://127.0.0.1:5000/process_excel";
 ``;
 // Function to transform data into desired schema
@@ -28,6 +30,7 @@ const transformData = (dayData, date) => {
 
 router.post("/upload", upload.single("file"), async (req, res) => {
   try {
+    const Sale = getModel(req.dbConnection, "Sale");
     console.log("Processing file...");
     const { start, end } = req.query;
     console.log("Start date:", start);
@@ -111,6 +114,8 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 
 router.get("/", async (req, res) => {
   try {
+    const Sale = getModel(req.dbConnection, "Sale");
+
     const { start, end } = req.query;
     console.log("Start date:", start);
     console.log("End date:", end);

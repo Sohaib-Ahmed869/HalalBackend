@@ -1,12 +1,13 @@
 const { Permission, Resource } = require("../models/rbac.model");
 const { User, Role } = require("../models/user.model");
+const { getModel } = require("../utils/modelFactory");
 
 class RBACController {
   // Role Management
   static async createRole(req, res) {
     try {
       const { name, description, accesses, isAdmin } = req.body;
-
+      const Role = getModel(req.dbConnection, "Role");
       const role = new Role({
         name,
         description,
@@ -26,6 +27,7 @@ class RBACController {
 
   static async getRoles(req, res) {
     try {
+      const Role = getModel(req.dbConnection, "Role");
       const roles = await Role.find();
       res.json(roles);
     } catch (error) {
@@ -40,6 +42,7 @@ class RBACController {
     try {
       const { roleId } = req.params;
       const { name, description, accesses, isAdmin } = req.body;
+      const Role = getModel(req.dbConnection, "Role");
 
       const role = await Role.findByIdAndUpdate(
         roleId,
@@ -64,7 +67,7 @@ class RBACController {
   static async createResource(req, res) {
     try {
       const { name, description, path, icon, parent, order } = req.body;
-
+      const Resource = getModel(req.dbConnection, "Resource");
       const resource = new Resource({
         name,
         description,
@@ -86,6 +89,7 @@ class RBACController {
 
   static async getResources(req, res) {
     try {
+      const Resource = getModel(req.dbConnection, "Resource");
       const resources = await Resource.find().populate("parent").sort("order");
       res.json(resources);
     } catch (error) {
@@ -100,7 +104,8 @@ class RBACController {
   static async assignRoleToUser(req, res) {
     try {
       const { userId, roleId } = req.body;
-
+      const User = getModel(req.dbConnection, "User");
+      const Role = getModel(req.dbConnection, "Role");
       const user = await User.findById(userId);
       const role = await Role.findById(roleId);
 
@@ -133,7 +138,7 @@ class RBACController {
   static async getUserAccess(req, res) {
     try {
       const { userId } = req.params;
-
+      const User = getModel(req.dbConnection, "User");
       const user = await User.findById(userId).populate("role");
 
       if (!user) {
@@ -144,6 +149,8 @@ class RBACController {
 
       // If user is admin, they have access to everything
       if (user.role?.isAdmin) {
+        // Fetch all resources to provide full access
+        const Resource = getModel(req.dbConnection, "Resource");
         const allResources = await Resource.find();
         const fullAccess = allResources.map((resource) => ({
           module: resource.name,
@@ -175,7 +182,7 @@ class RBACController {
   static async checkAccess(req, res) {
     try {
       const { userId, module, action } = req.body;
-
+      const User = getModel(req.dbConnection, "User");
       const user = await User.findById(userId).populate("role");
 
       if (!user) {
@@ -210,7 +217,7 @@ class RBACController {
     try {
       const { roleId } = req.params;
       const { modulePermissions } = req.body;
-
+      const Role = getModel(req.dbConnection, "Role");
       const role = await Role.findById(roleId);
 
       if (!role) {
@@ -254,7 +261,7 @@ class RBACController {
     try {
       const { roleId, module } = req.params;
       const { read, write, delete: deletePermission } = req.body;
-
+      const Role = getModel(req.dbConnection, "Role");
       const role = await Role.findById(roleId);
 
       if (!role) {

@@ -1,12 +1,14 @@
-const Expense = require("../models/expense.model");
-const Analysis = require("../models/analysis.model");
+
+const { getModel } = require("../utils/modelFactory");
 
 class ExpenseController {
   static async createExpense(req, res) {
     try {
       const { name, amount, tag, analysisId } = req.body;
-
+      
       // Validate if analysis exists
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const Expense = getModel(req.dbConnection, "Expense");
       const analysis = await Analysis.findById(analysisId);
       if (!analysis) {
         return res.status(404).json({ error: "Analysis not found" });
@@ -14,7 +16,6 @@ class ExpenseController {
 
       //get the analysis start date
       const startDate = analysis.dateRange.start;
-
       // Create new expense
       const expense = new Expense({
         name,
@@ -41,12 +42,15 @@ class ExpenseController {
       const { analysisId } = req.params;
 
       // Validate if analysis exists
+      const Analysis = getModel(req.dbConnection, "Analysis");
+
       const analysis = await Analysis.findById(analysisId);
       if (!analysis) {
         return res.status(404).json({ error: "Analysis not found" });
       }
 
       // Get all expenses for this analysis
+      const Expense = getModel(req.dbConnection, "Expense");
       const expenses = await Expense.find({ analysisId }).sort({
         createdAt: -1,
       });
@@ -65,7 +69,7 @@ class ExpenseController {
     try {
       const { id } = req.params;
       const { name, amount, tag } = req.body;
-
+      const Expense = getModel(req.dbConnection, "Expense");
       const expense = await Expense.findById(id);
       if (!expense) {
         return res.status(404).json({ error: "Expense not found" });
@@ -91,7 +95,7 @@ class ExpenseController {
   static async deleteExpense(req, res) {
     try {
       const { id } = req.params;
-
+      const Expense = getModel(req.dbConnection, "Expense");
       const expense = await Expense.findByIdAndDelete(id);
       if (!expense) {
         return res.status(404).json({ error: "Expense not found" });
@@ -129,7 +133,10 @@ class ExpenseController {
           query.createdAt.$lte = new Date(endDate);
         }
       }
-
+      // Get all expenses
+      // Validate if analysis exists
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const Expense = getModel(req.dbConnection, "Expense");
       const expenses = await Expense.find(query)
         .sort({ createdAt: -1 })
         .populate("analysisId", "dateRange"); // Populate analysis date range if needed
@@ -147,6 +154,7 @@ class ExpenseController {
   static async getExpenseTags(req, res) {
     try {
       // Get unique tags
+      const Expense = getModel(req.dbConnection, "Expense");
       const tags = await Expense.distinct("tag");
 
       res.json({

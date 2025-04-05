@@ -3,12 +3,17 @@ const Invoice = require("../../models/invoice.model");
 const Payment = require("../../models/payment.model");
 const mongoose = require("mongoose");
 const { processTagFilter } = require("../../utils/filterHelper");
+const { getModel } = require("../../utils/modelFactory");
+
 const customerController = {
   /**
    * Get customer list with summary metrics
    */
   getCustomers: async (req, res) => {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      
       const {
         startDate,
         endDate,
@@ -136,6 +141,8 @@ const customerController = {
    */
   getCustomerJourney: async (req, res) => {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
       const { customerCode } = req.params;
       const { page = 1, limit = 10, startDate, endDate, tags } = req.query;
 
@@ -257,6 +264,8 @@ const customerController = {
    */
   getOrderDetails: async (req, res) => {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
       const { invoiceId } = req.params;
 
       // Get invoice details including line items

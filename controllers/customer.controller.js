@@ -1,6 +1,7 @@
 const xlsx = require('xlsx');
 const mongoose = require('mongoose');
 const Customer = require('../models/customer.model'); // Adjust path as needed
+const { getModel } = require("../utils/modelFactory");
 
 // Function to generate a simple email from business name
 
@@ -8,7 +9,7 @@ const Customer = require('../models/customer.model'); // Adjust path as needed
 // Function to import data
 async function importCustomers() {
     try {
-
+        const Customer = getModel(req.dbConnection, 'Customer'); 
         // Read Excel file
         const workbook = xlsx.readFile('20250117T002950.943-Customers List.xlsx');
         const sheetName = workbook.SheetNames[0];
@@ -56,6 +57,7 @@ async function importCustomers() {
 
 const importCustomer = async (req, res) => {
     try {
+        const Customer = getModel(req.dbConnection, 'Customer');
         await importCustomers();
         res.status(200).send('Import completed');
     } catch (err) {

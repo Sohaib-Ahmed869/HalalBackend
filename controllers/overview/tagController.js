@@ -1,6 +1,7 @@
 // controllers/tagsController.js
 const Tag = require("../../models/tags.model");
 const PurchaseInvoice = require("../../models/Purchase");
+const { getModel } = require("../../utils/modelFactory");
 
 const tagsController = {
   /**
@@ -8,6 +9,8 @@ const tagsController = {
    */
   getAllTags: async (req, res) => {
     try {
+      const Tag = getModel(req.dbConnection, "Tag");
+      const PurchaseInvoice = getModel(req.dbConnection, "PurchaseInvoice");
       const tags = await Tag.find().sort({ name: 1 });
       res.json(tags);
     } catch (error) {
@@ -21,6 +24,8 @@ const tagsController = {
    */
   getPurchasesByTag: async (req, res) => {
     try {
+      const Tag = getModel(req.dbConnection, "Tag");
+      const PurchaseInvoice = getModel(req.dbConnection, "PurchaseInvoice");
       const { tagName } = req.params;
       const { startDate, endDate, page = 1, limit = 10 } = req.query;
 

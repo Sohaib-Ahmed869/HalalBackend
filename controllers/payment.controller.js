@@ -4,6 +4,8 @@ const multer = require("multer");
 const csv = require("csv-parser");
 const XLSX = require("xlsx");
 const fs = require("fs");
+const { getModel } = require("../utils/modelFactory");
+
 
 const upload = multer({
   dest: "uploads/",
@@ -12,6 +14,7 @@ const upload = multer({
 class PaymentController {
   static async getPayments(req, res) {
     try {
+      const Payment = getModel(req.dbConnection, "Payment");
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 100;
       const sortField = req.query.sortField || "DocDate";
@@ -59,6 +62,8 @@ class PaymentController {
 
   static async syncPayments(req, res) {
     try {
+      const Payment = getModel(req.dbConnection, "Payment");
+
       const headers = {
         Cookie: req.headers.cookie,
       };
@@ -148,6 +153,8 @@ class PaymentController {
 
   static async getPaymentStats(req, res) {
     try {
+      const Payment = getModel(req.dbConnection, "Payment");
+
       const { startDate, endDate } = req.query;
 
       if (!startDate || !endDate) {
@@ -224,6 +231,8 @@ class PaymentController {
 
   static async toggleVerified(req, res) {
     try {
+      const Payment = getModel(req.dbConnection, "Payment");
+
       const { DocEntry } = req.params;
 
       const payment = await Payment.findOne({ DocEntry });
@@ -243,6 +252,8 @@ class PaymentController {
   }
   static async processCSV(req, res) {
     try {
+      const Payment = getModel(req.dbConnection, "Payment");
+
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
@@ -388,6 +399,8 @@ class PaymentController {
   // Helper function to process a batch of payments
   static async processExcel(req, res) {
     try {
+      const Payment = getModel(req.dbConnection, "Payment");
+
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
@@ -561,6 +574,8 @@ class PaymentController {
 }
 async function saveRecords(records) {
   try {
+    const Payment = getModel(req.dbConnection, "Payment");
+
     for (const record of records) {
       try {
         await Payment.findOneAndUpdate(

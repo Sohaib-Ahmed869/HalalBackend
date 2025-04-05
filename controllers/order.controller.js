@@ -1,43 +1,47 @@
 const axios = require("axios");
 const Order = require("../models/Order");
+const { getModel } = require("../utils/modelFactory");
 
 class OrderController {
   static async getAllPaginatedData(baseUrl, headers) {
+    const Order = getModel(req.dbConnection, "Order");
+
     let allOrders = [];
     let nextLink = `${baseUrl}/Orders?$orderby=CreationDate desc&$top=999999`;
-    console.log('Next link:', nextLink);
+    console.log("Next link:", nextLink);
     while (nextLink) {
       try {
         const response = await axios.get(nextLink, { headers });
         allOrders = [...allOrders, ...response.data.value];
-        
+
         // Get the next link from the response
-        nextLink = response.data['@odata.nextLink'];
-        
-        console.log('Next link:', nextLink);
+        nextLink = response.data["@odata.nextLink"];
+
+        console.log("Next link:", nextLink);
         // If no next link, break the loop
         if (!nextLink) break;
-        
+
         // If nextLink is a relative URL, make it absolute
-        if (nextLink.startsWith('Orders')) {
+        if (nextLink.startsWith("Orders")) {
           nextLink = `${baseUrl}/${nextLink}`;
         }
-        
+
         // Add $top to the next link if it doesn't have it
-        if (!nextLink.includes('$top=')) {
-          nextLink += nextLink.includes('?') ? '&' : '?';
-          nextLink += '$top=999999';
+        if (!nextLink.includes("$top=")) {
+          nextLink += nextLink.includes("?") ? "&" : "?";
+          nextLink += "$top=999999";
         }
       } catch (error) {
         throw new Error(`Pagination error: ${error.message}`);
       }
     }
-    
+
     return allOrders;
   }
 
   static async getOrders(req, res) {
     try {
+      const Order = getModel(req.dbConnection, "Order");
       const headers = {
         Cookie: req.headers.cookie,
       };
@@ -48,8 +52,7 @@ class OrderController {
         headers
       );
 
-      console.log('Total orders fetched:', orders.length);
-
+      console.log("Total orders fetched:", orders.length);
       const results = await Promise.all(
         orders.map(async (order) => {
           try {
@@ -125,6 +128,7 @@ class OrderController {
 
   static async addTag(req, res) {
     try {
+      const Order = getModel(req.dbConnection, "Order");
       const { docEntry, tag } = req.body;
 
       if (!docEntry) {
@@ -135,9 +139,8 @@ class OrderController {
 
       const order = await Order.findOne({ docEntry });
 
-    
       if (!order) {
-        console.log('Order not found');
+        console.log("Order not found");
         return res.status(404).json({
           error: "Sales order not found",
         });
@@ -155,13 +158,14 @@ class OrderController {
       console.error("Error adding tag:", error);
       res.status(500).json({
         error: "Failed to add tag",
-        details: error.message, 
+        details: error.message,
       });
     }
   }
 
   static async removeTag(req, res) {
     try {
+      const Order = getModel(req.dbConnection, "Order");
       const { docEntry, tag } = req.body;
 
       if (!docEntry || !tag) {

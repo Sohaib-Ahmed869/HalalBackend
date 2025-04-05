@@ -1,13 +1,15 @@
 const axios = require("axios");
-const Invoice = require("../models/invoice.model");
-const Payment = require("../models/payment.model");
-const PaymentLink = require("../models/paymentLinks.model");
-const CreditNotes = require("../models/creditnotes.model");
-const Return = require("../models/returns.model");
+const { getModel } = require("../utils/modelFactory");
 
 class InvoiceController {
   static async getInvoices(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
+
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 100;
       const sortField = req.query.sortField || "CreationDate";
@@ -53,6 +55,11 @@ class InvoiceController {
     }
   }
   static determinePaymentMethod(invoice) {
+    const Invoice = getModel(req.dbConnection, "Invoice");
+    const Payment = getModel(req.dbConnection, "Payment");
+    const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+    const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+    const Return = getModel(req.dbConnection, "Return");
     const isPOS =
       invoice.CardCode === "C9999" ||
       invoice.CardName?.toLowerCase().includes("comptoir") ||
@@ -106,6 +113,11 @@ class InvoiceController {
   }
 
   static async getAllPaginatedData(baseUrl, headers) {
+    const Invoice = getModel(req.dbConnection, "Invoice");
+    const Payment = getModel(req.dbConnection, "Payment");
+    const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+    const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+    const Return = getModel(req.dbConnection, "Return");
     let allData = [];
     let nextLink = `${baseUrl}/Invoices?$orderby=CreationDate desc`;
 
@@ -130,6 +142,11 @@ class InvoiceController {
 
   static async syncInvoices(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const { year } = req.params;
 
       if (!year || isNaN(year)) {
@@ -239,6 +256,11 @@ class InvoiceController {
 
   static async getInvoicesByDate(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const { startDate, endDate } = req.query;
 
       if (!startDate || !endDate) {
@@ -277,6 +299,11 @@ class InvoiceController {
 
   static async getPaymentMethodStats(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const { year } = req.params;
 
       if (!year || isNaN(year)) {
@@ -321,6 +348,11 @@ class InvoiceController {
 
   static async updateInvoiceTag(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const { DocEntry } = req.params;
       const { tag } = req.body;
       console.log("Tag:", tag);
@@ -347,6 +379,11 @@ class InvoiceController {
 
   static async toggleVerified(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const { DocEntry } = req.params;
 
       const invoice = await Invoice.findOne({ DocEntry });
@@ -369,6 +406,11 @@ class InvoiceController {
 
   static async getInvoiceStats(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const { year, month } = req.query;
 
       let dateMatch = {};
@@ -436,6 +478,11 @@ class InvoiceController {
 
   static async getCustomerBalance(cardCode) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const result = await Invoice.aggregate([
         { $match: { CardCode: cardCode } },
         {
@@ -465,6 +512,11 @@ class InvoiceController {
 
   static async getCustomerBalance(cardCode) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const result = await Invoice.aggregate([
         { $match: { CardCode: cardCode } },
         {
@@ -494,6 +546,11 @@ class InvoiceController {
 
   static async getCustomerLastActivity(cardCode) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const lastInvoice = await Invoice.findOne(
         { CardCode: cardCode },
         { DocDate: 1, DocNum: 1 }
@@ -519,6 +576,11 @@ class InvoiceController {
 
   static async getCustomerCreditNotes(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const { cardCode } = req.params;
       const { startDate, endDate } = req.query;
 
@@ -581,6 +643,11 @@ class InvoiceController {
 
   static async getCustomerReturns(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const { cardCode } = req.params;
       const { startDate, endDate } = req.query;
 
@@ -643,6 +710,11 @@ class InvoiceController {
 
   static async getCustomerDetailedStats(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const { cardCode } = req.params;
       const { startDate, endDate } = req.query;
 
@@ -717,6 +789,11 @@ class InvoiceController {
 
   static async getCustomerPayments(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const { cardCode } = req.params;
       const { startDate, endDate } = req.query;
 
@@ -814,6 +891,11 @@ class InvoiceController {
   // Add to InvoiceController class
   static async getCustomerStats(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 10;
       const sortField = req.query.sortField || "customerName";
@@ -883,6 +965,11 @@ class InvoiceController {
 
   static async getCustomerInvoices(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const { cardCode, status } = req.query;
 
       if (!cardCode) {
@@ -911,6 +998,11 @@ class InvoiceController {
   // In InvoiceController.js, add this method:
   static async getDashboardStats(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const { startDate, endDate } = req.query;
 
       // Base match condition for date filtering
@@ -1103,6 +1195,11 @@ class InvoiceController {
 
   static async updateCustomerTag(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const { customerName } = req.body;
       const { tag } = req.body;
 
@@ -1129,6 +1226,11 @@ class InvoiceController {
 
   static async updatePOSPaymentMethods(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       // Get all invoices from 2024
       const startDate = new Date("2024-01-01");
       const endDate = new Date("2024-12-31T23:59:59.999Z");
@@ -1246,6 +1348,11 @@ class InvoiceController {
 
   static async getCustomerAnalytics(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       // Get date range from query params or use default
       const startDate = req.query.startDate
         ? new Date(req.query.startDate)
@@ -1325,6 +1432,11 @@ class InvoiceController {
 
   static async getCustomerProducts(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const CreditNotes = getModel(req.dbConnection, "CreditNotes");
+      const Return = getModel(req.dbConnection, "Return");
       const { customerId } = req.params;
       const startDate = req.query.startDate
         ? new Date(req.query.startDate)

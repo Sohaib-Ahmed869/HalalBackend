@@ -1,18 +1,27 @@
 const jwt = require("jsonwebtoken");
 const { User } = require("../models/user.model");
+const { getConnection } = require("../config/db.config");
+const { getModel } = require("../utils/modelFactory");
 
 class AuthController {
   static async login(req, res) {
     try {
       res.header("Access-Control-Allow-Credentials", "true");
-      const { username, password } = req.body;
-
-      if (!username || !password) {
+      const { username, password, company } = req.body;
+      console.log("Login request:", req.body);
+      if (!username || !password || !company) {
         return res.status(400).json({
           error: "Missing credentials",
-          details: "Username and password are required",
+          details: "Username, password, and company are required",
         });
       }
+
+      // Get the connection for the selected company
+      const db = await getConnection(company);
+
+      // Dynamically get the User model with the correct connection
+      const userSchema = require("../models/user.model").userSchema;
+      const User = getModel(db, "User");
 
       // Find user
       const user = await User.findOne({ username });
@@ -37,12 +46,13 @@ class AuthController {
       user.lastLogin = new Date();
       await user.save();
 
-      // Generate access token
+      // Generate access token with company info included
       const token = jwt.sign(
         {
           userId: user._id,
           username: user.username,
           isAdmin: user.isAdmin,
+          company: company, // Include company in the token
         },
         process.env.JWT_SECRET,
         { expiresIn: "24h" }
@@ -51,7 +61,6 @@ class AuthController {
       // Prepare user access data
       let permissions;
       if (user.isAdmin) {
-        // Admin has full access to everything
         permissions = AuthController.generateFullAccess();
       } else {
         permissions = user.permissions;
@@ -65,6 +74,7 @@ class AuthController {
           email: user.email,
           isAdmin: user.isAdmin,
           permissions: permissions,
+          company: company, // Return company to frontend
         },
         token,
       });
@@ -122,6 +132,7 @@ class AuthController {
       // Create default permissions if none provided
       const defaultPermissions = AuthController.generateDefaultPermissions();
 
+      const User = getModel(req.dbConnection, "User");
       const user = new User({
         username,
         password,
@@ -176,6 +187,7 @@ class AuthController {
   static async getUserAccess(req, res) {
     try {
       const userId = req.params.userId;
+      const User = getModel(req.dbConnection, "User");
       const user = await User.findById(userId);
 
       if (!user) {
@@ -202,10 +214,13 @@ class AuthController {
 
   static async getAllUsers(req, res) {
     try {
+      const db = await getConnection(req.body.company);
+      const User = getModel(req.dbConnection, "User");
       const users = await User.find({}, "-password");
 
       res.json(users);
     } catch (error) {
+      console.error("Get all users error:", error);
       res.status(500).json({
         error: "Failed to get users",
         details: error.message,

@@ -1,8 +1,7 @@
 const SalesOrder = require("../models/salesOrder.model");
-const Customer = require("../models/customer.model");
 const nodemailer = require("nodemailer");
 const axios = require("axios");
-
+const { getModel } = require("../utils/modelFactory");
 require("dotenv").config();
 
 const transporter = nodemailer.createTransport({
@@ -26,7 +25,7 @@ const getAllSalesOrders = async (req, res) => {
     const query = {
       DocumentStatus: "bost_Open",
     };
-
+    const SalesOrder = getModel(req.dbConnection, "SalesOrder");
     const [salesOrders, total] = await Promise.all([
       SalesOrder.find(query).sort({ DocDate: -1 }).skip(skip).limit(limit),
       SalesOrder.countDocuments(query),
@@ -55,6 +54,7 @@ const getSalesOrdersByDateRange = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 1000;
     const skip = (page - 1) * limit;
+    const SalesOrder = getModel(req.dbConnection, "SalesOrder");
 
     // Validate date parameters
     if (!startDate || !endDate) {
@@ -132,6 +132,7 @@ const getSalesOrderWithCustomer = async (req, res) => {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
     const skip = (page - 1) * limit;
+    const SalesOrder = getModel(req.dbConnection, "SalesOrder");
 
     const salesOrdersWithCustomer = await SalesOrder.aggregate([
       {
@@ -187,22 +188,41 @@ const getSalesOrderWithCustomer = async (req, res) => {
   }
 };
 
-const loginToSAP = async (retries = 3, delay = 5000) => {
+const loginToSAP = async (
+  company = "MSF Halal New Live",
+  retries = 3,
+  delay = 5000
+) => {
   let lastError;
+
+  // Determine which database to use based on company
+  let companyDB;
+
+  if (company === "MSF Halal New Live") {
+    companyDB = "MSF_HALAL_LIVE_NEW";
+  } else if (company === "company2") {
+    companyDB = "A19865_HALAL_FOODSERVICE_BORDEAUX_NEW";
+  } else if (company === "company3") {
+    companyDB = "A19865_HALAL_FOODSERVICE_LYON_NEW";
+  } else {
+    companyDB = "MSF_HALAL_LIVE_NEW"; // Default
+  }
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      console.log(`SAP login attempt ${attempt}/${retries}...`);
+      console.log(
+        `SAP login attempt ${attempt}/${retries} for ${companyDB}...`
+      );
 
       const loginData = {
-        CompanyDB: process.env.COMPANY_DB,
+        CompanyDB: companyDB,
         UserName: process.env.USER_NAME,
         Password: process.env.PASSWORD,
       };
 
       // Log the request without sensitive information
       console.log(`Attempting to connect to: ${process.env.BASE_URL}/Login`);
-      console.log(`Using company DB: ${process.env.COMPANY_DB}`);
+      console.log(`Using company DB: ${companyDB}`);
 
       const response = await axios.post(
         `${process.env.BASE_URL}/Login`,
@@ -293,7 +313,12 @@ const generatePaymentLink = async (req, res) => {
   try {
     const { docNum } = req.params;
     const { email } = req.body;
+    // Get company from request (set by auth middleware)
+    const company = req.company || "MSF Halal New Live";
+
     // Fetch the sales order
+    const SalesOrder = getModel(req.dbConnection, "SalesOrder");
+
     const salesOrder = await SalesOrder.findOne({ DocNum: docNum });
     if (!salesOrder) {
       return res.status(404).json({
@@ -534,6 +559,8 @@ const generatePaymentLink = async (req, res) => {
 const getUpdateOnPaymentLink = async (req, res) => {
   try {
     const { docNum } = req.params;
+    const SalesOrder = getModel(req.dbConnection, "SalesOrder");
+
     const salesOrder = await SalesOrder.findOne({ DocNum: docNum });
 
     if (!salesOrder) {
@@ -583,15 +610,31 @@ const getUpdateOnPaymentLink = async (req, res) => {
 
 const syncNewOrders = async (req, res) => {
   try {
-    console.log("Starting manual sync for today's orders...");
+    console.log("Starting manual sync for orders...");
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    // Get date parameters from request, or use defaults
+    let startDate = req.query.startDate
+      ? new Date(req.query.startDate)
+      : new Date();
+    let endDate = req.query.endDate ? new Date(req.query.endDate) : new Date();
 
-    const formattedToday = today.toISOString();
-    const formattedTomorrow = tomorrow.toISOString();
+    // If no specific dates provided, default to 3 days back to 5 days forward
+    if (!req.query.startDate) {
+      startDate.setHours(0, 0, 0, 0);
+      startDate.setDate(startDate.getDate() - 3);
+    }
+
+    if (!req.query.endDate) {
+      endDate.setHours(23, 59, 59, 999);
+      endDate.setDate(startDate.getDate() + 5);
+    }
+
+    const formattedStartDate = startDate.toISOString();
+    const formattedEndDate = endDate.toISOString();
+
+    // Get company from request (set by auth middleware)
+    const company = req.company || "MSF Halal New Live";
+    const SalesOrder = getModel(req.dbConnection, "SalesOrder");
 
     const stats = {
       totalProcessed: 0,
@@ -604,10 +647,16 @@ const syncNewOrders = async (req, res) => {
         failed: [],
       },
     };
-    const cookies = await loginToSAP();
+
+    // Pass the company name to loginToSAP
+    const cookies = await loginToSAP(company);
     console.log(cookies);
 
-    let nextLink = `${process.env.BASE_URL}/Orders?$filter=CreationDate ge '${formattedToday}' and CreationDate lt '${formattedTomorrow}'&$orderby=CreationDate`;
+    let nextLink = `${process.env.BASE_URL}/Orders?$filter=CreationDate ge '${formattedStartDate}' and CreationDate lt '${formattedEndDate}' and DocumentStatus eq 'bost_Open'&$orderby=CreationDate`;
+    console.log(
+      `Fetching orders for company ${company} from ${formattedStartDate} to ${formattedEndDate}`
+    );
+    console.log(nextLink);
 
     while (nextLink) {
       try {
@@ -633,6 +682,7 @@ const syncNewOrders = async (req, res) => {
                 ...order,
                 syncedAt: new Date(),
                 lastUpdated: new Date(),
+                company: company, // Store company information with the order
               };
 
               await SalesOrder.create(orderWithMetadata);
@@ -679,9 +729,13 @@ const syncNewOrders = async (req, res) => {
       }
     }
 
-    // Prepare summary response
+    // Prepare summary response with date range and company information
     const summary = {
-      date: today.toLocaleDateString(),
+      dateRange: {
+        from: startDate.toLocaleDateString(),
+        to: endDate.toLocaleDateString(),
+      },
+      company: company,
       stats: {
         totalProcessed: stats.totalProcessed,
         newlyStored: stats.newlyStored,
@@ -725,6 +779,7 @@ const checkOrderStatus = async (req, res) => {
     const query = {
       DocumentStatus: "bost_Open", // Only get orders that are currently open in our database
     };
+    const SalesOrder = getModel(req.dbConnection, "SalesOrder");
 
     // Count total orders that need checking
     const totalOrdersToCheck = await SalesOrder.countDocuments(query);
@@ -1082,6 +1137,8 @@ const processBatch = async (orderBatch, cookies, timeout, results) => {
 // Helper function to process a single order
 const processOrder = async (order, cookies, timeout, results) => {
   try {
+    const SalesOrder = getModel(req.dbConnection, "SalesOrder");
+
     // Create filter query for a single DocNum
     const response = await axios.get(
       `${process.env.BASE_URL}/Orders('${order.DocEntry}')`,
@@ -1202,7 +1259,7 @@ const processOrder = async (order, cookies, timeout, results) => {
       success: false,
     });
   }
-};
+};  
 
 module.exports = {
   getAllSalesOrders,

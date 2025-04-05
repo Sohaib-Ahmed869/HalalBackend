@@ -2,12 +2,15 @@
 const Invoice = require("../../models/invoice.model");
 const mongoose = require("mongoose");
 const { processTagFilter } = require("../../utils/filterHelper");
+const { getModel } = require("../../utils/modelFactory");
+
 const productController = {
   /**
    * Get product analytics with sales information
    */
   getProductAnalytics: async (req, res) => {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
       const { startDate, endDate, tags } = req.query;
       const dateFilter = {
         DocDate: {
@@ -100,6 +103,8 @@ const productController = {
    */
   getProductOrderHistory: async (req, res) => {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+
       const { productCode } = req.params;
       const { page = 1, limit = 10, startDate, endDate, tags } = req.query;
 

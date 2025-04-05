@@ -4,6 +4,8 @@ const Invoice = require("../../models/invoice.model");
 const Payment = require("../../models/payment.model");
 const Tag = require("../../models/tags.model");
 const Expense = require("../../models/expense.model");
+const { getModel } = require("../../utils/modelFactory");
+
 const { processTagFilter } = require("../../utils/filterHelper");
 // Create a utility function to process tag filter
 const buildTagFilter = (tags) => {
@@ -37,6 +39,12 @@ const buildTagFilter = (tags) => {
 const overviewController = {
   getOverview: async (req, res) => {
     try {
+      const PurchaseInvoice = getModel(req.dbConnection, "PurchaseInvoice");
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const Expense = getModel(req.dbConnection, "Expense");
+      const Tag = getModel(req.dbConnection, "Tag");
+
       const { startDate, endDate, tags } = req.query;
 
       const dateFilter = {

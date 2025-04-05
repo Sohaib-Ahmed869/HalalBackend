@@ -1,11 +1,12 @@
 // controllers/permission.controller.js
 const { User } = require("../models/user.model");
-
+const { getModel } = require("../utils/modelFactory");
 class PermissionController {
   // Get user permissions
   static async getUserPermissions(req, res) {
     try {
       const { userId } = req.params;
+      const User = getModel(req.dbConnection, "User");
       const user = await User.findById(userId);
 
       if (!user) {
@@ -57,7 +58,7 @@ class PermissionController {
     try {
       const { userId } = req.params;
       const { permissions } = req.body;
-
+      const User = getModel(req.dbConnection, "User");
       const user = await User.findById(userId);
 
       if (!user) {
@@ -90,7 +91,7 @@ class PermissionController {
   static async checkPermission(req, res) {
     try {
       const { userId, module } = req.params;
-
+      const User = getModel(req.dbConnection, "User");
       const user = await User.findById(userId);
 
       if (!user) {
@@ -123,7 +124,7 @@ class PermissionController {
     try {
       const { userId } = req.params;
       const { modulePermissions } = req.body;
-
+      const User = getModel(req.dbConnection, "User");
       const user = await User.findById(userId);
 
       if (!user) {

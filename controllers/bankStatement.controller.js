@@ -5,6 +5,7 @@ const pdfParse = require("pdf-parse");
 const { parse } = require("ofx-parser");
 const axios = require("axios");
 const FormData = require("form-data");
+const { getModel } = require("../utils/modelFactory");
 
 /**
  * Bank Statement Processor Module
@@ -27,7 +28,7 @@ class BankStatementController {
       console.log(`Processing file of type: ${fileType} for bank: ${bankName}`);
 
       let formattedData = [];
-
+      
       try {
         if (fileType === "pdf") {
           formattedData = await BankStatementController.processPDF(
@@ -80,7 +81,7 @@ class BankStatementController {
           JSON.stringify(formattedData[formattedData.length - 1])
         );
       }
-
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
       // Store valid transactions in the database
       const result = await BankStatement.insertMany(formattedData);
       console.log("Transactions inserted successfully", formattedData.length);
@@ -1141,6 +1142,7 @@ class BankStatementController {
       }
 
       // Count total before applying pagination
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
       const total = await BankStatement.countDocuments(query);
 
       const statements = await BankStatement.find(query)
@@ -1176,7 +1178,7 @@ class BankStatementController {
       ) {
         return res.status(400).json({ error: "Invalid tag value" });
       }
-
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
       const statement = await BankStatement.findByIdAndUpdate(
         statementId,
         {
@@ -1216,7 +1218,7 @@ class BankStatementController {
       if (bank) {
         query.bank = bank;
       }
-
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
       const statements = await BankStatement.find(query).sort({
         operationDate: -1,
       });
@@ -1259,7 +1261,7 @@ class BankStatementController {
       if (bank) {
         dateMatch.bank = bank;
       }
-
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
       const stats = await BankStatement.aggregate([
         { $match: dateMatch },
         {
@@ -1341,7 +1343,7 @@ class BankStatementController {
       if (bank) {
         query.bank = bank;
       }
-
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
       const monthlyData = await BankStatement.aggregate([
         { $match: query },
         {
@@ -1414,6 +1416,7 @@ class BankStatementController {
    */
   static async getBanks(req, res) {
     try {
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
       const banks = await BankStatement.distinct("bank");
 
       const bankStats = await Promise.all(

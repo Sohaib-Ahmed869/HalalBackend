@@ -1,10 +1,6 @@
 const stringSimilarity = require("string-similarity");
-const Invoice = require("../models/invoice.model");
-const Analysis = require("../models/analysis.model");
-const BankStatement = require("../models/bankStatement.model");
-const Payment = require("../models/payment.model");
-const PaymentLink = require("../models/paymentLinks.model");
-const Sale = require("../models/sales.model");
+const { getModel } = require("../utils/modelFactory");
+
 
 const mongoose = require("mongoose");
 
@@ -232,6 +228,13 @@ class AnalysisController {
 
   static async compareData(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
+      
       const { excelData, dateRange } = req.body;
       console.log("Received Excel Data:", excelData);
       console.log("Date range:", dateRange);
@@ -977,6 +980,12 @@ class AnalysisController {
 
   static async checkPaymentResolutions(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId } = req.body;
 
       // Get the original analysis to get the unmatched payments
@@ -1077,6 +1086,12 @@ class AnalysisController {
   }
   static async resolveUnmatchedPayment(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId, paymentId, resolution, matchedTransactions } =
         req.body;
 
@@ -1212,6 +1227,12 @@ class AnalysisController {
   // Add method to find potential matches for unmatched payments
   static async findPotentialExcelMatchesForPayment(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId, paymentId } = req.body;
 
       const analysis = await Analysis.findById(analysisId);
@@ -1337,6 +1358,12 @@ class AnalysisController {
 
   static async resolveDiscrepancy(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId, category, index, resolution, matchedInvoices } =
         req.body;
 
@@ -1442,6 +1469,12 @@ class AnalysisController {
 
   static async getAnalyses(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { start, end } = req.query;
       const query = {};
 
@@ -1575,6 +1608,12 @@ class AnalysisController {
 
   static async getAnalysisById(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { id } = req.params;
       const analysis = await Analysis.findById(id).lean();
 
@@ -1592,6 +1631,12 @@ class AnalysisController {
   // Update this part in your compareData function
   static async compareBankData(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { dateRange, analysisId } = req.body;
       console.log("Received Bank Data:", dateRange);
 
@@ -1769,6 +1814,12 @@ class AnalysisController {
 
   static async reconcileBank(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const {
         analysisId,
         categoryReconciled,
@@ -1841,6 +1892,12 @@ class AnalysisController {
   }
   static async resolveBankDiscrepancy(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId, bankStatementId, resolution, matchedTransactions } =
         req.body;
 
@@ -1891,6 +1948,12 @@ class AnalysisController {
 
   static async updateBankMatchStatus(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId, matchId, status, notes } = req.body;
 
       const analysis = await Analysis.findById(analysisId);
@@ -1928,6 +1991,12 @@ class AnalysisController {
 
   static async getAnalysisStats(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId } = req.params;
 
       // 1) Load the Analysis
@@ -2139,6 +2208,12 @@ class AnalysisController {
 
   static async getMatchedStats(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId } = req.params;
 
       // 1) Load analysis
@@ -2397,6 +2472,12 @@ class AnalysisController {
 
   static async checkInvoiceResolutions(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId } = req.body;
 
       // Get the original analysis to get the SAP discrepancies
@@ -2500,6 +2581,12 @@ class AnalysisController {
 
   static async matchToBank(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId, bankStatement, excelMatch, resolution, date } =
         req.body;
 
@@ -2586,6 +2673,12 @@ class AnalysisController {
 
   static async resolveSAPDiscrepancy(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId, sapInvoiceId, resolution, matchedTransactions } =
         req.body;
 
@@ -2776,6 +2869,12 @@ class AnalysisController {
 
   static async findPotentialExcelMatches(sapInvoice) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       // Calculate date range (±20 days)
       const sapDate = new Date(sapInvoice.DocDate);
       const startDate = new Date(sapDate);
@@ -2888,6 +2987,12 @@ class AnalysisController {
 
   static async findPotentialExcelMatchesForSAP(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId, sapInvoiceId } = req.body;
 
       const analysis = await Analysis.findById(analysisId);
@@ -2920,6 +3025,12 @@ class AnalysisController {
 
   static async closeOffWithANote(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId, note } = req.body;
 
       const analysis = await Analysis.findById(analysisId);
@@ -2939,6 +3050,12 @@ class AnalysisController {
 
   static async POScloseOffWithANote(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId, note } = req.body;
 
       const analysis = await Analysis.findById(analysisId);
@@ -2958,6 +3075,12 @@ class AnalysisController {
 
   static async addNoteToAnalysis(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const { analysisId, note, note_category } = req.body;
 
       console.log("Adding note to analysis", analysisId, note, note_category);
@@ -2988,6 +3111,12 @@ class AnalysisController {
 
   static async getAnalysisNotDoneDates(req, res) {
     try {
+      const Invoice = getModel(req.dbConnection, "Invoice");
+      const Payment = getModel(req.dbConnection, "Payment");
+      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
+      const Analysis = getModel(req.dbConnection, "Analysis");
+      const BankStatement = getModel(req.dbConnection, "BankStatement");
+      const Sale = getModel(req.dbConnection, "Sale");
       const analyses = await Analysis.find().lean();
       let analysisDates = analyses.map((a) => a.dateRange.start);
       //get analysis dates to cut the time part

@@ -1,4 +1,5 @@
 const CreditNote = require("../models/creditnotes.model"); // Assuming the schema is defined and exported from this file
+const { getModel } = require("../utils/modelFactory");
 
 class CreditNoteController {
   static async getCreditNotesByDate(req, res) {
@@ -14,14 +15,13 @@ class CreditNoteController {
       const skip = (page - 1) * limit;
 
       // Query to fetch credit notes by date
+      const CreditNote = getModel(req.dbConnection, "CreditNotes");
       const creditNotes = await CreditNote.find({
         DocDate: {
           $gte: new Date(startDate),
           $lte: new Date(endDate),
         },
-      })
-        .skip(skip)
-     
+      }).skip(skip);
 
       // Total count for pagination
       const totalCreditNotes = await CreditNote.countDocuments({
@@ -55,6 +55,7 @@ class CreditNoteController {
       if (!docNum) {
         return res.status(400).json({ error: "Document number is required" });
       }
+      const CreditNote = getModel(req.dbConnection, "CreditNote");
 
       const creditNote = await CreditNote.findOne({ DocNum: docNum }).lean(); // For better performance
 
