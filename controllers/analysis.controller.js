@@ -2867,14 +2867,14 @@ class AnalysisController {
     }
   }
 
-  static async findPotentialExcelMatches(sapInvoice) {
+  static async findPotentialExcelMatches(sapInvoice, dbConnection) {
     try {
-      const Invoice = getModel(req.dbConnection, "Invoice");
-      const Payment = getModel(req.dbConnection, "Payment");
-      const PaymentLink = getModel(req.dbConnection, "PaymentLink");
-      const Analysis = getModel(req.dbConnection, "Analysis");
-      const BankStatement = getModel(req.dbConnection, "BankStatement");
-      const Sale = getModel(req.dbConnection, "Sale");
+      const Invoice = getModel(dbConnection, "Invoice");
+      const Payment = getModel(dbConnection, "Payment");
+      const PaymentLink = getModel(dbConnection, "PaymentLink");
+      const Analysis = getModel(dbConnection, "Analysis");
+      const BankStatement = getModel(dbConnection, "BankStatement");
+      const Sale = getModel(dbConnection, "Sale");
       // Calculate date range (±20 days)
       const sapDate = new Date(sapInvoice.DocDate);
       const startDate = new Date(sapDate);
@@ -3014,7 +3014,7 @@ class AnalysisController {
 
       // Get potential matches
       const potentialMatches =
-        await AnalysisController.findPotentialExcelMatches(sapInvoice);
+        await AnalysisController.findPotentialExcelMatches(sapInvoice, req.dbConnection);
 
       res.json({ potentialMatches });
     } catch (error) {
