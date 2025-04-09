@@ -2869,11 +2869,7 @@ class AnalysisController {
 
   static async findPotentialExcelMatches(sapInvoice, dbConnection) {
     try {
-      const Invoice = getModel(dbConnection, "Invoice");
-      const Payment = getModel(dbConnection, "Payment");
-      const PaymentLink = getModel(dbConnection, "PaymentLink");
-      const Analysis = getModel(dbConnection, "Analysis");
-      const BankStatement = getModel(dbConnection, "BankStatement");
+      console.log("Finding potential Excel matches for SAP invoice:", sapInvoice, dbConnection);
       const Sale = getModel(dbConnection, "Sale");
       // Calculate date range (±20 days)
       const sapDate = new Date(sapInvoice.DocDate);
