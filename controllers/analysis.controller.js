@@ -423,6 +423,12 @@ class AnalysisController {
       for (const excelEntry of flattenedExcelData) {
         if (excelEntry.isPOS) continue;
 
+        console.log(
+          "Trying to match:",
+          excelEntry.client,
+          excelEntry.date,
+          excelEntry.amount
+        );
         let bestMatch = null;
         let bestScore = 0;
         let bestIndex = -1;
@@ -443,10 +449,13 @@ class AnalysisController {
 
           const excelDate = new Date(excelEntry.date);
           const sapDate = new Date(sapEntry.CreationDate);
-          const dateDiff =
+          let dateDiff =
             Math.abs(excelDate - sapDate) / (1000 * 60 * 60 * 24);
+         
+          //round the date difference to the nearest integer
+          dateDiff = Math.round(dateDiff);
 
-          if (dateDiff === 0) {
+          if (dateDiff === 0 || dateDiff === 1) {
             // Extended matching window
             const amountDiff = Math.abs(excelEntry.amount - sapEntry.DocTotal);
             // const amountTolerance = sapEntry.DocTotal * 0.01;
@@ -464,6 +473,7 @@ class AnalysisController {
                 bestScore = 1;
                 bestMatch = sapEntry;
                 bestIndex = index;
+                console.log("ok");
                 return; // Exit the loop as we found an exact match
               }
 
@@ -477,6 +487,8 @@ class AnalysisController {
                   bestScore = containsScore;
                   bestMatch = sapEntry;
                   bestIndex = index;
+                  console.log("ok");
+
                   return;
                 }
               }
@@ -486,6 +498,7 @@ class AnalysisController {
                 normalizedExcelName,
                 normalizedSapName
               );
+              console.log("ok");
 
               bestScore = similarity;
               bestMatch = sapEntry;
@@ -528,10 +541,13 @@ class AnalysisController {
           paymentsWithoutPOS.forEach((payment, index) => {
             const excelDate = new Date(excelEntry.date);
             const paymentDate = new Date(payment.CreationDate);
-            const dateDiff =
+            let dateDiff =
               Math.abs(excelDate - paymentDate) / (1000 * 60 * 60 * 24);
 
-            if (dateDiff === 0) {
+            //round the date difference to the nearest integer
+            dateDiff = Math.round(dateDiff);
+            console.log(dateDiff);
+            if (dateDiff === 0 || dateDiff === 1) {
               const amountDiff = Math.abs(excelEntry.amount - payment.DocTotal);
               if (amountDiff == 0) {
                 const normalizedExcelName =
@@ -663,7 +679,6 @@ class AnalysisController {
             });
 
             if (paymentLinks && paymentLinks.length > 0) {
-              console.log(paymentLinks.length);
               //check if invoice is not a POS invoice
               if (invoice.U_EPOSNo) {
                 //process each payment link
@@ -678,7 +693,6 @@ class AnalysisController {
                     new Date(invoice.DocDate).setHours(0, 0, 0, 0) ===
                     adjustedPaymentDate.setHours(0, 0, 0, 0)
                   ) {
-                    console.log(paymentLink.paymentNumber);
                     paymentDocNums.push(paymentLink.paymentNumber);
                   }
                 });
@@ -704,8 +718,6 @@ class AnalysisController {
       let payments = await Payment.find({
         DocNum: { $in: paymentDocNums },
       });
-
-      console.log(payments.length);
 
       payments.forEach((payment) => {
         if (payment.CashSum > 0) {
@@ -854,7 +866,6 @@ class AnalysisController {
 
       // 7. Filter for truly unmatched payments
       const unmatchedPayments = nonPOSPayments.filter((payment) => {
-        console.log(payment.CardName, payment.DocTotal, payment.DocDate);
         // If payment was already matched in the analysis, exclude it
         if (matchedPaymentNumbers.has(payment.DocNum)) {
           return false;
@@ -1023,8 +1034,6 @@ class AnalysisController {
           },
         ],
       }).lean();
-
-      console.log("Found analyses:", analyses.length);
 
       // Create resolution map
       const resolutionMap = {};
