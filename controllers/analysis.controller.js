@@ -1,7 +1,6 @@
 const stringSimilarity = require("string-similarity");
 const { getModel } = require("../utils/modelFactory");
 
-
 const mongoose = require("mongoose");
 
 const safeParseFloat = (value) => {
@@ -234,7 +233,7 @@ class AnalysisController {
       const Analysis = getModel(req.dbConnection, "Analysis");
       const BankStatement = getModel(req.dbConnection, "BankStatement");
       const Sale = getModel(req.dbConnection, "Sale");
-      
+
       const { excelData, dateRange } = req.body;
       console.log("Received Excel Data:", excelData);
       console.log("Date range:", dateRange);
@@ -782,7 +781,8 @@ class AnalysisController {
         ...invoice,
         potentialMatches: AnalysisController.findPotentialExcelMatches(
           invoice,
-          req.dbConnection,
+          req,
+          flattenedExcelData
         ),
       }));
 
@@ -2867,10 +2867,9 @@ class AnalysisController {
     }
   }
 
-  static async findPotentialExcelMatches(sapInvoice, dbConnection) {
+  static async findPotentialExcelMatches(sapInvoice, req) {
     try {
-  
-      const Sale = getModel(dbConnection, "Sale");
+      const Sale = getModel(req.dbConnection, "Sale");
       // Calculate date range (±20 days)
       const sapDate = new Date(sapInvoice.DocDate);
       const startDate = new Date(sapDate);
@@ -3010,7 +3009,7 @@ class AnalysisController {
 
       // Get potential matches
       const potentialMatches =
-        await AnalysisController.findPotentialExcelMatches(sapInvoice, req.dbConnection);
+        await AnalysisController.findPotentialExcelMatches(sapInvoice, req);
 
       res.json({ potentialMatches });
     } catch (error) {
