@@ -236,7 +236,7 @@ class AnalysisController {
       const Sale = getModel(req.dbConnection, "Sale");
       
       const { excelData, dateRange } = req.body;
-     
+      console.log("Received Excel Data:", excelData);
       console.log("Date range:", dateRange);
 
       // Selected date range (for displaying discrepancies)
@@ -679,7 +679,7 @@ class AnalysisController {
                     new Date(invoice.DocDate).setHours(0, 0, 0, 0) ===
                     adjustedPaymentDate.setHours(0, 0, 0, 0)
                   ) {
-                   
+                    console.log(paymentLink.paymentNumber);
                     paymentDocNums.push(paymentLink.paymentNumber);
                   }
                 });
@@ -782,7 +782,7 @@ class AnalysisController {
         ...invoice,
         potentialMatches: AnalysisController.findPotentialExcelMatches(
           invoice,
-          flattenedExcelData
+          req.dbConnection,
         ),
       }));
 
@@ -854,7 +854,7 @@ class AnalysisController {
 
       // 7. Filter for truly unmatched payments
       const unmatchedPayments = nonPOSPayments.filter((payment) => {
-  
+        console.log(payment.CardName, payment.DocTotal, payment.DocDate);
         // If payment was already matched in the analysis, exclude it
         if (matchedPaymentNumbers.has(payment.DocNum)) {
           return false;
@@ -1095,7 +1095,8 @@ class AnalysisController {
       const { analysisId, paymentId, resolution, matchedTransactions } =
         req.body;
 
-     
+      console.log("Received resolution data:", req.body);
+
       const analysis = await Analysis.findById(analysisId);
       if (!analysis) {
         return res.status(404).json({ error: "Analysis not found" });
@@ -2634,7 +2635,7 @@ class AnalysisController {
       if (!analysis.bankReconciliation.matches) {
         analysis.bankReconciliation.matches = [];
       }
-     
+      console.log("Adding match", match);
       analysis.bankReconciliation.matches.push(match);
       console.log("Added");
 
@@ -2868,7 +2869,7 @@ class AnalysisController {
 
   static async findPotentialExcelMatches(sapInvoice, dbConnection) {
     try {
-      console.log("Finding potential Excel matches for SAP invoice:", dbConnection);
+  
       const Sale = getModel(dbConnection, "Sale");
       // Calculate date range (±20 days)
       const sapDate = new Date(sapInvoice.DocDate);
