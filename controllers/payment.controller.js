@@ -6,7 +6,6 @@ const XLSX = require("xlsx");
 const fs = require("fs");
 const { getModel } = require("../utils/modelFactory");
 
-
 const upload = multer({
   dest: "uploads/",
   limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit
@@ -399,175 +398,379 @@ class PaymentController {
   // Helper function to process a batch of payments
   static async processExcel(req, res) {
     try {
+      const startTime = Date.now();
       const Payment = getModel(req.dbConnection, "Payment");
 
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
 
-      const batchSize = 500;
-      let records = [];
-      let totalProcessed = 0;
-      let errors = [];
-      let rowNumber = 0;
+      console.log("Starting payment Excel import...");
 
-      // Helper function to parse date format DD/MM/YY
-      const parseDate = (dateStr) => {
-        if (!dateStr) return null;
+      // Helper function to parse date format DD/MM/YY with improved performance
+      const parseDate = (dateValue) => {
+        if (!dateValue) return null;
 
         try {
-          // Handle DD/MM/YY format
-          if (typeof dateStr === "string" && dateStr.includes("/")) {
-            const [day, month, year] = dateStr
-              .split("/")
-              .map((num) => num.trim());
-            // Ensure all components exist
-            if (!day || !month || !year) return null;
-
-            // Convert YY to YYYY
-            const fullYear = year.length === 2 ? `20${year}` : year;
-
-            // Create date string in ISO format (YYYY-MM-DD)
-            const dateString = `${fullYear}-${month.padStart(
-              2,
-              "0"
-            )}-${day.padStart(2, "0")}`;
-            const parsed = new Date(dateString);
-
-            // Validate the parsed date
-            if (isNaN(parsed.getTime())) return null;
-            return parsed;
+          // If it's already a Date object (from Excel)
+          if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
+            return dateValue;
           }
 
-          // If it's already a Date object
-          if (dateStr instanceof Date && !isNaN(dateStr.getTime())) {
-            return dateStr;
+          // Handle DD/MM/YY string format
+          if (typeof dateValue === "string") {
+            const dateStr = dateValue.trim();
+
+            // Match DD/MM/YY or D/M/YY patterns
+            const shortYearPattern = /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/;
+            const match = dateStr.match(shortYearPattern);
+
+            if (match) {
+              const [, day, month, shortYear] = match;
+              const fullYear = 2000 + parseInt(shortYear); // Convert 23 -> 2023
+
+              // Create date in YYYY-MM-DD format to avoid timezone issues
+              const paddedMonth = month.padStart(2, "0");
+              const paddedDay = day.padStart(2, "0");
+              const parsedDate = new Date(
+                `${fullYear}-${paddedMonth}-${paddedDay}`
+              );
+
+              if (!isNaN(parsedDate.getTime())) {
+                return parsedDate;
+              }
+            }
+
+            // Try standard date parsing as fallback
+            const fallbackDate = new Date(dateStr);
+            if (!isNaN(fallbackDate.getTime())) {
+              return fallbackDate;
+            }
+          }
+
+          // Handle Excel serial dates
+          if (typeof dateValue === "number") {
+            const parsedDate = new Date((dateValue - 25569) * 86400 * 1000);
+            if (!isNaN(parsedDate.getTime())) {
+              return parsedDate;
+            }
           }
 
           return null;
         } catch (error) {
-          console.error(`Error parsing date ${dateStr}:`, error);
+          console.warn(`Error parsing date ${dateValue}:`, error.message);
           return null;
         }
       };
 
-      // Helper function to clean amount
+      // Helper function to clean amount (optimized)
       const cleanAmount = (amount) => {
-        if (typeof amount === "number") return amount;
+        if (typeof amount === "number" && !isNaN(amount)) return amount;
         if (!amount) return 0;
-        return parseFloat(amount.toString().replace(/[^\d.-]/g, "")) || 0;
+
+        const cleaned = parseFloat(amount.toString().replace(/[^\d.-]/g, ""));
+        return isNaN(cleaned) ? 0 : cleaned;
       };
 
-      try {
-        // Read the Excel file
-        const workbook = XLSX.readFile(req.file.path, {
+      // Read the Excel file with optimized settings
+      let workbook;
+      if (req.file.buffer) {
+        // Memory storage - read from buffer
+        workbook = XLSX.read(req.file.buffer, {
+          type: "buffer",
           cellDates: true,
           cellNF: true,
-          cellText: false,
+          cellStyles: false, // Disable for performance
+          sheetStubs: false, // Skip empty cells
         });
-
-        // Assume first sheet
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-
-        // Convert to JSON with raw values
-        const rows = XLSX.utils.sheet_to_json(worksheet, {
-          header: 1,
-          raw: true,
-          dateNF: "dd/mm/yy",
+      } else if (req.file.path) {
+        // Disk storage - read from file path
+        const fs = require("fs");
+        workbook = XLSX.readFile(req.file.path, {
+          cellDates: true,
+          cellNF: true,
+          cellStyles: false, // Disable for performance
+          sheetStubs: false, // Skip empty cells
         });
+      } else {
+        throw new Error("No file buffer or path available");
+      }
 
-        // Skip header row
-        for (let i = 1; i < rows.length; i++) {
-          rowNumber = i + 1;
-          const row = rows[i];
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+
+      // Convert to JSON with optimized settings
+      const rows = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+        raw: false, // Get formatted values
+        defval: "", // Default for empty cells
+        blankrows: false, // Skip blank rows
+      });
+
+      console.log(`Parsed ${rows.length - 1} data rows from Excel`);
+
+      // Pre-process and validate all data in memory first
+      const validPayments = [];
+      const errors = [];
+      const currentDate = new Date();
+
+      // Skip header row and process data
+      for (let i = 1; i < rows.length; i++) {
+        const rowNumber = i + 1;
+        const row = rows[i];
+
+        try {
+          // Skip completely empty rows
+          if (!row || row.every((cell) => !cell)) {
+            continue;
+          }
+
+          // Parse dates with validation
+          const docDate = parseDate(row[5]); // Posting Date
+          const creationDate = parseDate(row[1]); // Creation Date
+
+          // Validate required fields
+          const docNum = parseInt(row[3]);
+          const cardCode = row[2]?.toString().trim();
+          const cardName = row[4]?.toString().trim();
+
+          // Enhanced validation
+          if (!docDate || !creationDate) {
+            throw new Error(
+              `Invalid dates - DocDate: '${row[5]}', CreationDate: '${row[1]}'`
+            );
+          }
+
+          if (!docNum || isNaN(docNum) || docNum <= 0) {
+            throw new Error(`Invalid DocNum: '${row[3]}'`);
+          }
+
+          if (!cardCode) {
+            throw new Error(`Missing CardCode`);
+          }
+
+          if (!cardName) {
+            throw new Error(`Missing CardName`);
+          }
+
+          // Create payment object
+          const payment = {
+            DocEntry: docNum, // Use DocNum as DocEntry since it should be unique
+            DocNum: docNum,
+            DocDate: docDate,
+            CardCode: cardCode,
+            CardName: cardName,
+            CashSum: cleanAmount(row[6]),
+            CreditSum: cleanAmount(row[7]), // Note: Schema doesn't have CreditSum field
+            TransferSum: cleanAmount(row[9]),
+            CheckSum: cleanAmount(row[8]), // Note: Schema doesn't have CheckSum field
+            DocTotal: cleanAmount(row[10]), // Note: Schema doesn't have DocTotal field
+            CreationDate: creationDate, // Note: Schema doesn't have CreationDate field
+            TransactionNumber: row[11]?.toString() || null,
+            UserSignature: 0, // Note: Schema doesn't have UserSignature field
+            verified: false,
+            dateStored: currentDate,
+          };
+
+          validPayments.push(payment);
+        } catch (error) {
+          errors.push({
+            row: rowNumber,
+            data: row.slice(0, 15), // Limit data size in error log
+            error: error.message,
+          });
+        }
+      }
+
+      console.log(
+        `Validated ${validPayments.length} payments, ${errors.length} errors`
+      );
+
+      // Check for existing payments with optimized query
+      console.log("Checking for existing payments...");
+      const docEntries = validPayments.map((p) => p.DocEntry);
+
+      // Check by DocEntry since that's the unique field
+      const existingPayments = await Payment.find(
+        { DocEntry: { $in: docEntries } },
+        { DocEntry: 1, _id: 0 } // Exclude _id for better performance
+      ).lean();
+
+      const existingDocEntries = new Set(
+        existingPayments.map((p) => p.DocEntry)
+      );
+
+      // Filter out existing payments
+      const newPayments = validPayments.filter(
+        (p) => !existingDocEntries.has(p.DocEntry)
+      );
+
+      console.log(
+        `Found ${existingDocEntries.size} existing payments, ${newPayments.length} new payments to insert`
+      );
+
+      // High-performance batch insert with smaller chunks
+      let insertedCount = 0;
+      let duplicateCount = existingDocEntries.size;
+      let insertErrors = 0;
+
+      if (newPayments.length > 0) {
+        const batchSize = 1000; // Even smaller batches for debugging
+        const totalBatches = Math.ceil(newPayments.length / batchSize);
+
+        console.log(
+          `Processing ${newPayments.length} payments in ${totalBatches} batches of ${batchSize}`
+        );
+
+        // Test with first record to identify schema issues
+        console.log(
+          "Testing first record structure:",
+          JSON.stringify(newPayments[0], null, 2)
+        );
+
+        for (let i = 0; i < newPayments.length; i += batchSize) {
+          const batch = newPayments.slice(i, i + batchSize);
+          const batchNumber = Math.floor(i / batchSize) + 1;
 
           try {
-            // Ensure we have enough columns
-
-            // Map columns according to the actual data structure
-            // [index, CreationDate, CardCode, DocNum, CardName, PostingDate, CashAmount, CreditAmount, ChequeAmount, TransferAmount, DocTotal, TransactionNumber, InternalNumber, UserSignature]
-            const docDate = parseDate(row[5]); // Posting Date (index 5)
-            const creationDate = parseDate(row[1]); // Creation Date (index 1)
-
-            // Skip row if crucial dates are invalid
-            if (!docDate || !creationDate) {
-              throw new Error(
-                `Invalid dates - DocDate: ${row[5]}, CreationDate: ${row[1]}`
-              );
-            }
-
-            const payment = {
-              DocEntry: 0,
-              DocNum: parseInt(row[3]), // Document Number (index 3)
-              DocDate: docDate,
-              CardCode: row[2], // Customer/Supplier No. (index 2)
-              CardName: row[4], // Customer/Supplier Name (index 4)
-              CashSum: cleanAmount(row[6]), // Cash Amount (index 6)
-              CreditSum: cleanAmount(row[7]), // Credit Amount (index 7)
-              TransferSum: cleanAmount(row[9]), // Transfer Amount (index 9)
-              CheckSum: cleanAmount(row[8]), // Cheque Amount (index 8)
-              DocTotal: cleanAmount(row[10]), // Document Total (index 10)
-              CreationDate: creationDate,
-              TransactionNumber: row[11]?.toString(), // Transaction Number (index 11)
-              UserSignature: 0,
-              verified: false,
-              dateStored: new Date(),
-            };
-
-            records.push(payment);
-
-            // Process in batches
-            if (records.length === batchSize) {
-              await saveRecords(records);
-              totalProcessed += records.length;
-              console.log(`Processed and saved ${totalProcessed} payments`);
-              records = []; // Clear the array after saving
-            }
-          } catch (error) {
-            errors.push({
-              row: {
-                rowNumber,
-                data: row,
-              },
-              error: error.message,
+            const startBatch = Date.now();
+            const result = await Payment.insertMany(batch, {
+              ordered: false,
+              lean: true,
+              writeConcern: { w: 1, j: false }, // Faster write concern
             });
+
+            insertedCount += result.length;
+            const batchTime = ((Date.now() - startBatch) / 1000).toFixed(1);
+
+            console.log(
+              `Batch ${batchNumber}/${totalBatches}: ${result.length} inserted in ${batchTime}s (Total: ${insertedCount})`
+            );
+          } catch (error) {
+            if (error.writeErrors) {
+              const batchInserted = batch.length - error.writeErrors.length;
+              insertedCount += batchInserted;
+              insertErrors += error.writeErrors.length;
+
+              // Log detailed error info for first few errors
+              if (batchNumber <= 3) {
+                console.error(`Batch ${batchNumber} errors (first 3):`);
+                error.writeErrors.slice(0, 3).forEach((writeError, idx) => {
+                  console.error(`Error ${idx + 1}:`, writeError.errmsg);
+                  console.error(
+                    `Failed record:`,
+                    JSON.stringify(batch[writeError.index], null, 2)
+                  );
+                });
+              }
+
+              console.log(
+                `Batch ${batchNumber}/${totalBatches}: ${batchInserted} inserted, ${error.writeErrors.length} errors`
+              );
+            } else {
+              console.error(
+                `Batch ${batchNumber} failed completely:`,
+                error.message
+              );
+
+              // Try single record insert to identify specific issue
+              if (batchNumber === 1) {
+                console.log(
+                  "Attempting single record insert to diagnose issue..."
+                );
+                try {
+                  const singleResult = await Payment.create(batch[0]);
+                  console.log("Single insert successful:", singleResult._id);
+                } catch (singleError) {
+                  console.error("Single insert failed:", singleError.message);
+                  console.error(
+                    "Record that failed:",
+                    JSON.stringify(batch[0], null, 2)
+                  );
+                }
+              }
+
+              insertErrors += batch.length;
+            }
+          }
+
+          // Break early if first few batches all fail
+          if (batchNumber === 3 && insertedCount === 0) {
+            console.error(
+              "First 3 batches failed completely. Stopping to prevent further issues."
+            );
+            console.error(
+              "Please check the data structure and schema validation."
+            );
+            break;
           }
         }
+      }
 
-        // Save any remaining records
-        if (records.length > 0) {
-          await saveRecords(records);
-          totalProcessed += records.length;
-        }
-
-        // Clean up uploaded file
+      // Clean up uploaded file (only if file was stored on disk)
+      if (req.file.path) {
         const fs = require("fs");
         fs.unlink(req.file.path, (err) => {
           if (err) console.error("Error deleting file:", err);
         });
-
-        res.json({
-          message: "Excel processing completed",
-          stats: {
-            totalProcessed,
-            errorsCount: errors.length,
-          },
-          errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
-        });
-      } catch (error) {
-        throw new Error(`Error processing Excel file: ${error.message}`);
       }
+
+      const endTime = Date.now();
+      const processingTime = ((endTime - startTime) / 1000).toFixed(2);
+
+      res.json({
+        success: true,
+        message: "Payment Excel import completed",
+        data: {
+          totalRowsProcessed: rows.length - 1, // Exclude header
+          validRecords: validPayments.length,
+          existingPayments: duplicateCount,
+          newPaymentsInserted: insertedCount,
+          skippedDuplicates: duplicateCount,
+          validationErrors: errors.length,
+          insertErrors: insertErrors,
+          processingTimeSeconds: processingTime,
+          summary: {
+            successRate: `${(
+              (insertedCount / validPayments.length) *
+              100
+            ).toFixed(1)}%`,
+            duplicateRate: `${(
+              (duplicateCount / validPayments.length) *
+              100
+            ).toFixed(1)}%`,
+            errorRate: `${((errors.length / (rows.length - 1)) * 100).toFixed(
+              1
+            )}%`,
+          },
+        },
+        // Include error samples if present
+        ...(errors.length > 0 &&
+          errors.length <= 10 && {
+            errorDetails: errors,
+          }),
+        ...(errors.length > 10 && {
+          errorSample: errors.slice(0, 5),
+          totalErrors: errors.length,
+          note: "Showing first 5 errors. Check server logs for complete error list.",
+        }),
+      });
     } catch (error) {
       console.error("Error processing Excel:", error);
+
+      // Clean up file on error
       if (req.file && req.file.path) {
         const fs = require("fs");
         fs.unlink(req.file.path, (err) => {
           if (err) console.error("Error deleting file:", err);
         });
       }
+
       res.status(500).json({
-        error: error.message || "Failed to process Excel file",
+        success: false,
+        error: "Error processing Excel file",
+        details: error.message,
+        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
       });
     }
   }

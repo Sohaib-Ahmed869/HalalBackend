@@ -4,7 +4,7 @@ const axios = require("axios");
 const { getModel } = require("../utils/modelFactory");
 require("dotenv").config();
 
-const transporter = nodemailer.createTransport({
+  const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: process.env.SMTP_PORT,
   secure: true,
