@@ -87,6 +87,7 @@ app.use(
       "http://localhost:5173",
       "http://halalfoods.s3-website.eu-north-1.amazonaws.com",
       "halalfoods.s3-website.eu-north-1.amazonaws.com",
+      "https://finance.foodservices.live"
     ],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     credentials: true,

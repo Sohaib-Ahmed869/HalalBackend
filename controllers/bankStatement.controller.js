@@ -28,7 +28,7 @@ class BankStatementController {
       console.log(`Processing file of type: ${fileType} for bank: ${bankName}`);
 
       let formattedData = [];
-      
+
       try {
         if (fileType === "pdf") {
           formattedData = await BankStatementController.processPDF(

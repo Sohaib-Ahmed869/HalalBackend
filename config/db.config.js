@@ -4,7 +4,7 @@ const mongoose = require("mongoose");
 // Database connection mapping
 const connectionStrings = {
   "MSF Halal New Live":
-    "mongodb+srv://sohaibsipra869:nvidia940MX@cluster0.q1so4va.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
+    "mongodb+srv://Sohaib:nvidia940MX@halalfoods.dvx3f.mongodb.net/?retryWrites=true&w=majority&appName=HalalFoods",
   company2:
     "mongodb+srv://<db_username>:<db_password>@halalfoodservicebordeau.dvx3f.mongodb.net/?retryWrites=true&w=majority&appName=Halalfoodservicebordeaux",
   company3:
