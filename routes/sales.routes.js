@@ -62,6 +62,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     console.log("Query params:", { start_date: start, end_date: end });
 
     // Add timeout to prevent hanging
+    // Add explicit JSON parsing for axios
     const response = await axios.post(FLASK_BACKEND_URL, formData, {
       params: {
         start_date: start,
@@ -73,6 +74,21 @@ router.post("/upload", upload.single("file"), async (req, res) => {
       proxy: false,
       httpAgent: new require("http").Agent({ family: 4 }),
       timeout: 60000, // 60 second timeout
+      responseType: "json", // Explicitly request JSON
+      transformResponse: [
+        function (data) {
+          // Custom response transformation
+          if (typeof data === "string") {
+            try {
+              return JSON.parse(data);
+            } catch (e) {
+              console.error("Failed to parse response as JSON:", e);
+              return data;
+            }
+          }
+          return data;
+        },
+      ],
     });
 
     console.log("Flask response status:", response.status);
