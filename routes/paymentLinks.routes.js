@@ -10,4 +10,4 @@ const upload = multer({ storage: storage });
 // Route for uploading Excel file
 router.post('/upload', upload.single('file'), paymentController.uploadPayments);
 
-module.exports = router;
+module.exports = router;  

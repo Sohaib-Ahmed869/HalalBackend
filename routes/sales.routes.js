@@ -21,9 +21,9 @@ const transformData = (dayData, date) => {
     Virements: dayData["Virements"] || [],
     "Livraisons non payées": dayData["Livraisons non payées"] || [],
     POS: {
-      "Caisse Espèces": dayData.POS["Caisse Espèces"] || [],
-      "Caisse chèques": dayData.POS["Caisse chèques"] || [],
-      "Caisse CB": dayData.POS["Caisse CB"] || [],
+      "Caisse Espèces": dayData.POS?.["Caisse Espèces"] || [],
+      "Caisse chèques": dayData.POS?.["Caisse chèques"] || [],
+      "Caisse CB": dayData.POS?.["Caisse CB"] || [],
     },
   };
 };
