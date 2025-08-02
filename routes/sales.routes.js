@@ -6,7 +6,7 @@ const FormData = require("form-data");
 const Sale = require("../models/sales.model");
 const upload = multer({ storage: multer.memoryStorage() });
 
-const {getModel} = require("../utils/modelFactory");
+const { getModel } = require("../utils/modelFactory");
 
 const FLASK_BACKEND_URL = "http://127.0.0.1:5001/process_excel";
 ``;
@@ -77,17 +77,33 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 
     console.log("Flask response status:", response.status);
     console.log("Flask response headers:", response.headers);
-    
+
     const processedData = response.data;
     console.log("Response type:", typeof processedData);
-    console.log("Response keys:", processedData ? Object.keys(processedData) : 'null');
-    
+    console.log("Response status:", response.status);
+    console.log("Response content-type:", response.headers["content-type"]);
+
+    // Log the actual response content (first 500 chars)
+    console.log(
+      "Response content (first 500 chars):",
+      typeof processedData === "string"
+        ? processedData.substring(0, 500)
+        : JSON.stringify(processedData).substring(0, 500)
+    );
+
     // Check if response is valid
-    if (!processedData || typeof processedData !== 'object') {
-      console.error("Invalid response from Flask backend:", processedData);
+    if (!processedData || typeof processedData !== "object") {
+      console.error("Invalid response from Flask backend");
+      console.error("Full response:", processedData);
       return res.status(500).json({
         error: "Invalid response from Flask backend",
-        received: typeof processedData
+        received: typeof processedData,
+        content:
+          typeof processedData === "string"
+            ? processedData.substring(0, 200)
+            : processedData,
+        status: response.status,
+        contentType: response.headers["content-type"],
       });
     }
 
@@ -100,9 +116,9 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     for (const [day, dayData] of Object.entries(processedData)) {
       try {
         console.log(`Processing day ${day}...`);
-        
+
         // Validate dayData
-        if (!dayData || typeof dayData !== 'object') {
+        if (!dayData || typeof dayData !== "object") {
           console.error(`Invalid dayData for day ${day}:`, dayData);
           errors.push(`Error processing day ${day}: Invalid day data`);
           continue;
@@ -111,25 +127,25 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         // Log dayData structure
         console.log(`Day ${day} data keys:`, Object.keys(dayData));
         console.log(`Day ${day} has POS:`, !!dayData.POS);
-        
+
         // Construct the date
         const [year, month] = start.split("-");
         const dayNum = parseInt(day);
-        
+
         if (isNaN(dayNum) || dayNum < 1 || dayNum > 31) {
           console.error(`Invalid day number: ${day}`);
           errors.push(`Error processing day ${day}: Invalid day number`);
           continue;
         }
-        
+
         const date = new Date(Number(year), Number(month) - 1, dayNum);
-        
+
         if (isNaN(date.getTime())) {
           console.error(`Invalid date constructed for day ${day}`);
           errors.push(`Error processing day ${day}: Invalid date`);
           continue;
         }
-        
+
         //set hours to 22:00:00
         date.setHours(22, 0, 0, 0);
         console.log(`Day ${day} date:`, date.toISOString());
@@ -155,7 +171,9 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     }
 
     console.log("Processing complete!");
-    console.log(`Saved: ${savedCount}, Skipped: ${skippedCount}, Errors: ${errors.length}`);
+    console.log(
+      `Saved: ${savedCount}, Skipped: ${skippedCount}, Errors: ${errors.length}`
+    );
 
     res.json({
       message: "Processing complete",
@@ -167,25 +185,25 @@ router.post("/upload", upload.single("file"), async (req, res) => {
   } catch (error) {
     console.error("Error processing file:", error.message);
     console.error("Error stack:", error.stack);
-    
-    if (error.code === 'ECONNREFUSED') {
+
+    if (error.code === "ECONNREFUSED") {
       return res.status(500).json({
         error: "Flask backend is not running or not accessible",
-        details: "Make sure Flask server is running on http://127.0.0.1:5001"
+        details: "Make sure Flask server is running on http://127.0.0.1:5001",
       });
     }
-    
-    if (error.code === 'ETIMEDOUT') {
+
+    if (error.code === "ETIMEDOUT") {
       return res.status(500).json({
         error: "Request to Flask backend timed out",
-        details: "Flask backend took too long to process the file"
+        details: "Flask backend took too long to process the file",
       });
     }
-    
+
     res.status(error.response?.status || 500).json({
       error: error.response?.data?.error || error.message,
       type: error.constructor.name,
-      code: error.code
+      code: error.code,
     });
   }
 });
